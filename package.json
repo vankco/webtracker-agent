@@ -1,0 +1,24 @@
+{
+  "name": "website-monitor-agent",
+  "version": "1.0.0",
+  "description": "AI-powered website change monitor using Playwright + Gemini + Discord",
+  "scripts": {
+    "start": "tsx src/agent.ts",
+    "dev": "tsx --watch src/agent.ts",
+    "watch-browser": "set RUN_ONCE=true&& set BROWSER_HEADLESS=false&& set BROWSER_SLOW_MO_MS=250&& set BROWSER_KEEP_OPEN_MS=5000&& tsx src/agent.ts",
+    "manual-assisted": "set MANUAL_ASSISTED=false&& set BROWSER_PERSIST_SESSION=true&& set BROWSER_HEADLESS=false&& tsx src/agent.ts"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "diff": "^9.0.0",
+    "dotenv": "^16.4.5",
+    "playwright": "^1.44.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.15.0",
+    "typescript": "^5.4.5"
+  }
+}
