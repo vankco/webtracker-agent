@@ -84,6 +84,12 @@ async function runCheck(): Promise<void> {
     return;
   }
 
+  if (currentContent === previousState.lastContent) {
+    console.log('No meaningful change: exact text match (skipped Gemini analysis).');
+    saveState({ url: targetUrl, lastContent: currentContent, lastChecked: new Date().toISOString() });
+    return;
+  }
+
   const { changed, summary } = await analyzeChanges(
     targetUrl,
     previousState.lastContent,
