@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import { diffWordsWithSpace, type Change } from 'diff';
 
 export interface AnalysisResult {
@@ -166,8 +166,7 @@ export async function analyzeChanges(
   newContent: string,
   apiKey: string
 ): Promise<AnalysisResult> {
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+  const genAI = new GoogleGenAI({ apiKey });
 
   const prompt = `You are monitoring a website for meaningful changes.
 
@@ -188,8 +187,15 @@ or
 {"changed": false, "summary": "No meaningful changes detected"}`;
 
   try {
-    const result = await model.generateContent(prompt);
-    const raw = result.response.text().trim();
+    const result = await genAI.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+    });
+    const raw = (result.text ?? '').trim();
+
+    if (!raw) {
+      throw new Error('Empty Gemini response text.');
+    }
 
     // Strip accidental markdown code fences
     const json = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');

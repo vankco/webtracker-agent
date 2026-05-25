@@ -9,7 +9,7 @@
     "manual-assisted": "set MANUAL_ASSISTED=false&& set BROWSER_PERSIST_SESSION=true&& set BROWSER_HEADLESS=false&& tsx src/agent.ts"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.21.0",
+    "@google/genai": "^2.6.0",
     "diff": "^9.0.0",
     "dotenv": "^16.4.5",
     "playwright": "^1.44.0",
