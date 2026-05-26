@@ -39,7 +39,7 @@ async function navigateWithFallback(page: Page, url: string, timeoutMs: number):
 
 function isPersistentSessionEnabled(): boolean {
   const manualAssisted = parseBooleanEnv(process.env['MANUAL_ASSISTED'], false);
-  const persistentRequested = parseBooleanEnv(process.env['BROWSER_PERSIST_SESSION'], false);
+  const persistentRequested = parseBooleanEnv(process.env['BROWSER_PERSIST_SESSION'], true);
   return manualAssisted || persistentRequested;
 }
 
