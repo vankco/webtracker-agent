@@ -5,20 +5,40 @@
   "scripts": {
     "start": "tsx src/agent.ts",
     "dev": "tsx --watch src/agent.ts",
+    "api": "set API_PORT=3001&& tsx src/agent.ts",
+    "api:dev": "set API_PORT=3001&& tsx --watch src/agent.ts",
     "watch-browser": "set RUN_ONCE=true&& set BROWSER_HEADLESS=false&& set BROWSER_SLOW_MO_MS=250&& set BROWSER_KEEP_OPEN_MS=5000&& tsx src/agent.ts",
-    "browser_mode": "set BROWSER_PERSIST_SESSION=true&& set BROWSER_HEADLESS=false&& tsx src/agent.ts"
+    "browser_mode": "set BROWSER_PERSIST_SESSION=true&& set BROWSER_HEADLESS=false&& tsx src/agent.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "client:dev": "cd client && npm run dev",
+    "client:build": "cd client && npm run build",
+    "client:typecheck": "cd client && npm run typecheck",
+    "dev:all": "concurrently -n api,ui -c cyan,magenta \"npm run api:dev\" \"npm run client:dev\""
   },
   "dependencies": {
     "@google/genai": "^2.6.0",
+    "cors": "^2.8.6",
     "diff": "^9.0.0",
     "dotenv": "^16.4.5",
+    "express": "^5.2.1",
+    "groq-sdk": "^1.2.0",
     "playwright": "^1.44.0",
     "playwright-extra": "^4.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/node": "^20.14.0",
+    "@types/supertest": "^7.2.0",
+    "@vitest/coverage-v8": "^4.1.7",
+    "concurrently": "^9.2.1",
+    "supertest": "^7.2.2",
     "tsx": "^4.15.0",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "vitest": "^4.1.7"
   }
 }

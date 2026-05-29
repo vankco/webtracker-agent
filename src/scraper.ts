@@ -4,6 +4,7 @@ import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { resolve } from 'node:path';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import type { BrowserConfig } from './config.js';
 
 chromium.use(StealthPlugin());
 
@@ -43,12 +44,19 @@ function isPersistentSessionEnabled(): boolean {
   return manualAssisted || persistentRequested;
 }
 
-async function getOrCreateSessionPage(headless: boolean, slowMoMs: number): Promise<Page> {
+async function getOrCreateSessionPage(
+  headless: boolean,
+  slowMoMs: number,
+  userDataDirOverride?: string
+): Promise<Page> {
   if (persistentPage && !persistentPage.isClosed()) {
     return persistentPage;
   }
 
-  const userDataDir = resolve(process.cwd(), process.env['BROWSER_USER_DATA_DIR'] || '.browser-profile');
+  const userDataDir = resolve(
+    process.cwd(),
+    userDataDirOverride || process.env['BROWSER_USER_DATA_DIR'] || '.browser-profile'
+  );
   persistentContext = await chromium.launchPersistentContext(userDataDir, {
     channel: 'chrome',
     headless,
@@ -130,17 +138,20 @@ async function waitForManualContinue(fallbackWaitMs: number): Promise<void> {
   }
 }
 
-export async function scrapePageText(url: string, selector?: string): Promise<string> {
-  const manualAssisted = parseBooleanEnv(process.env['MANUAL_ASSISTED'], false);
-  const persistentSession = isPersistentSessionEnabled();
-  const headless = manualAssisted ? false : parseBooleanEnv(process.env['BROWSER_HEADLESS'], true);
-  const slowMoMs = Math.max(0, parseIntEnv(process.env['BROWSER_SLOW_MO_MS'], 0));
-  const keepOpenMs = Math.max(0, parseIntEnv(process.env['BROWSER_KEEP_OPEN_MS'], 0));
-  const gotoTimeoutMs = Math.max(10_000, parseIntEnv(process.env['BROWSER_GOTO_TIMEOUT_MS'], 60_000));
-  const initialManualWaitMs = Math.max(
-    0,
-    parseIntEnv(process.env['MANUAL_ASSISTED_INITIAL_WAIT_MS'], 120_000)
-  );
+export async function scrapePageText(
+  url: string,
+  selector?: string,
+  browserConfig?: BrowserConfig
+): Promise<string> {
+  const manualAssisted = browserConfig?.manualAssisted ?? parseBooleanEnv(process.env['MANUAL_ASSISTED'], false);
+  const persistentSession = browserConfig?.persistSession ?? isPersistentSessionEnabled();
+  const headless = browserConfig?.headless ?? (manualAssisted ? false : parseBooleanEnv(process.env['BROWSER_HEADLESS'], true));
+  const slowMoMs = browserConfig?.slowMoMs ?? Math.max(0, parseIntEnv(process.env['BROWSER_SLOW_MO_MS'], 0));
+  const keepOpenMs = browserConfig?.keepOpenMs ?? Math.max(0, parseIntEnv(process.env['BROWSER_KEEP_OPEN_MS'], 0));
+  const gotoTimeoutMs = browserConfig?.gotoTimeoutMs ?? Math.max(10_000, parseIntEnv(process.env['BROWSER_GOTO_TIMEOUT_MS'], 60_000));
+  const initialManualWaitMs =
+    browserConfig?.manualAssistedInitialWaitMs ??
+    Math.max(0, parseIntEnv(process.env['MANUAL_ASSISTED_INITIAL_WAIT_MS'], 120_000));
   const shouldAwaitManualStep = manualAssisted && !persistentPage;
 
   const browser = persistentSession
@@ -152,7 +163,9 @@ export async function scrapePageText(url: string, selector?: string): Promise<st
       });
 
   try {
-    const page = persistentSession ? await getOrCreateSessionPage(headless, slowMoMs) : await browser!.newPage();
+    const page = persistentSession
+      ? await getOrCreateSessionPage(headless, slowMoMs, browserConfig?.userDataDir)
+      : await browser!.newPage();
 
     if (!persistentSession) {
       // Mimic a real browser

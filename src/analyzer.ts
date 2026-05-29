@@ -109,7 +109,7 @@ function getChangedSnippetPairs(
   return pairs;
 }
 
-function localFallbackAnalysis(oldContent: string, newContent: string): AnalysisResult {
+export function localFallbackAnalysis(oldContent: string, newContent: string): AnalysisResult {
   if (oldContent === newContent) {
     return {
       changed: false,
@@ -152,19 +152,12 @@ function localFallbackAnalysis(oldContent: string, newContent: string): Analysis
   };
 }
 
-function isQuotaOrRateLimitError(err: unknown): boolean {
-  if (!err || typeof err !== 'object') return false;
-
-  const withStatus = err as { status?: number; message?: string };
-  const message = (withStatus.message ?? '').toLowerCase();
-  return withStatus.status === 429 || message.includes('quota') || message.includes('rate limit');
-}
-
 export async function analyzeChanges(
   url: string,
   oldContent: string,
   newContent: string,
-  apiKey: string
+  apiKey: string,
+  model = 'gemini-2.5-flash'
 ): Promise<AnalysisResult> {
   const genAI = new GoogleGenAI({ apiKey });
 
@@ -188,7 +181,7 @@ or
 
   try {
     const result = await genAI.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model,
       contents: prompt,
     });
     const raw = (result.text ?? '').trim();
@@ -201,10 +194,8 @@ or
     const json = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
     return JSON.parse(json) as AnalysisResult;
   } catch (err) {
-    if (isQuotaOrRateLimitError(err)) {
-      console.warn('Gemini quota/rate-limit hit. Falling back to local text-diff analysis.');
-      return localFallbackAnalysis(oldContent, newContent);
-    }
-    throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`Gemini analysis failed (${message}). Falling back to local text-diff analysis.`);
+    return localFallbackAnalysis(oldContent, newContent);
   }
 }
