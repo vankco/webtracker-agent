@@ -83,9 +83,14 @@ export interface PutProvidersRequest {
   providers: ProviderUpdate[];
 }
 
+export interface ModelEntry {
+  id: string;
+  tier: 'free' | 'paid';
+}
+
 export interface ProviderModels {
   providerId: LlmProviderId;
-  models: string[];
+  models: ModelEntry[];
   defaultModel: string;
 }
 

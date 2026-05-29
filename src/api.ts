@@ -11,6 +11,7 @@ import cors from 'cors';
 import {
   getSafeConfig,
   getEnabledProvidersByPriority,
+  saveJsonConfig,
   KNOWN_PROVIDER_MODELS,
   type ConfigStore,
   type AppConfig,
@@ -63,6 +64,72 @@ function fail(
     error: { code, message, ...(details !== undefined ? { details } : {}) },
   };
   res.status(status).json(body);
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic model catalog — fetched from provider APIs, cached for 5 minutes
+// Falls back to KNOWN_PROVIDER_MODELS if the key is missing or the call fails
+// ---------------------------------------------------------------------------
+
+import type { ModelEntry } from './api-types.js';
+
+// Populated once at startup — never re-fetched until the process restarts
+const modelCache = new Map<LlmProviderId, ModelEntry[]>();
+
+// Build a lookup of known tier annotations for a provider
+function tierMap(providerId: LlmProviderId): Map<string, 'free' | 'paid'> {
+  return new Map(KNOWN_PROVIDER_MODELS[providerId].models.map((m) => [m.id, m.tier]));
+}
+
+// Merge live model ids with tier annotations; unknown models default to 'paid'
+function toModelEntries(ids: string[], providerId: LlmProviderId): ModelEntry[] {
+  const tiers = tierMap(providerId);
+  return ids.map((id) => ({ id, tier: tiers.get(id) ?? 'paid' }));
+}
+
+async function fetchGeminiModels(apiKey: string): Promise<string[]> {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+    { signal: AbortSignal.timeout(8_000) }
+  );
+  if (!res.ok) throw new Error(`Gemini models API ${res.status}`);
+  const data = await res.json() as {
+    models: Array<{ name: string; supportedGenerationMethods?: string[] }>;
+  };
+  return data.models
+    .filter((m) => m.supportedGenerationMethods?.includes('generateContent'))
+    .map((m) => m.name.replace('models/', ''))
+    .filter((id) => id.startsWith('gemini'))
+    .sort();
+}
+
+async function fetchGroqModels(apiKey: string): Promise<string[]> {
+  const res = await fetch('https://api.groq.com/openai/v1/models', {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!res.ok) throw new Error(`Groq models API ${res.status}`);
+  const data = await res.json() as { data: Array<{ id: string }> };
+  return data.data.map((m) => m.id).sort();
+}
+
+async function warmModelCache(config: AppConfig): Promise<void> {
+  await Promise.all(
+    (Object.keys(KNOWN_PROVIDER_MODELS) as LlmProviderId[]).map(async (id) => {
+      const provider = config.llmProviders.find((p) => p.id === id);
+      try {
+        const ids = !provider?.apiKey
+          ? KNOWN_PROVIDER_MODELS[id].models.map((m) => m.id)
+          : id === 'gemini'
+            ? await fetchGeminiModels(provider.apiKey)
+            : await fetchGroqModels(provider.apiKey);
+        modelCache.set(id, toModelEntries(ids, id));
+      } catch {
+        modelCache.set(id, KNOWN_PROVIDER_MODELS[id].models);
+      }
+    })
+  );
+  console.log('[api] Model catalog ready.');
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +191,7 @@ export function createApiRouter(
     }
 
     configStore.update(update);
+    saveJsonConfig(configStore.get());
     ok(res, configStore.getSafe());
   });
 
@@ -181,6 +249,7 @@ export function createApiRouter(
     }
 
     configStore.update({ llmProviders: Array.from(providerMap.values()) });
+    saveJsonConfig(configStore.get());
     ok(res, configStore.getSafe().llmProviders);
   });
 
@@ -242,10 +311,10 @@ export function createApiRouter(
   // GET /api/llm/providers/models
   // -------------------------------------------------------------------------
   router.get('/llm/providers/models', (_req: Request, res: Response) => {
-    const catalog = Object.entries(KNOWN_PROVIDER_MODELS).map(([id, info]) => ({
-      providerId: id as LlmProviderId,
-      models: info.models,
-      defaultModel: info.default,
+    const catalog = (Object.keys(KNOWN_PROVIDER_MODELS) as LlmProviderId[]).map((id) => ({
+      providerId: id,
+      models: modelCache.get(id) ?? KNOWN_PROVIDER_MODELS[id].models,
+      defaultModel: KNOWN_PROVIDER_MODELS[id].default,
     }));
     ok(res, catalog);
   });
@@ -356,6 +425,9 @@ export function createApiApp(
 
   app.use(cors());
   app.use(express.json());
+
+  // Fetch model lists from provider APIs once at startup (fire-and-forget)
+  void warmModelCache(configStore.get());
 
   // Mount all routes under /api
   app.use('/api', createApiRouter(configStore, monitorController));

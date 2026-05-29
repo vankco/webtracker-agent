@@ -36,6 +36,10 @@ const useStyles = makeStyles({
     padding: tokens.spacingVerticalXL,
     paddingLeft: tokens.spacingHorizontalXL,
     paddingRight: tokens.spacingHorizontalXL,
+    '@media (max-width: 600px)': {
+      padding: tokens.spacingVerticalM,
+      paddingBottom: '72px', // room for bottom nav
+    },
   },
 });
 

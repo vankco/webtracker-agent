@@ -2,6 +2,7 @@ import 'dotenv/config';
 import {
   loadAppConfig,
   loadAppConfigLenient,
+  resolveEnv,
   ConfigStore,
   getEnabledProvidersByPriority,
   type LlmProviderConfig,
@@ -35,7 +36,7 @@ async function main(): Promise<void> {
     //   2. Start the Express API server — UI/operator configures via REST.
     //   3. Do NOT auto-start the monitor loop; POST /api/monitor/start does it.
     // -------------------------------------------------------------------
-    const initial = loadAppConfigLenient(process.env);
+    const initial = loadAppConfigLenient(resolveEnv());
     const configStore = new ConfigStore(initial);
     const monitorController = new MonitorController();
 
@@ -58,7 +59,7 @@ async function main(): Promise<void> {
     // Classic CLI mode (backward-compatible):
     //   Strict config load → immediate monitor loop.
     // -------------------------------------------------------------------
-    const config = loadAppConfig(process.env);
+    const config = loadAppConfig(resolveEnv());
     const enabledProviders = getEnabledProvidersByPriority(config)
       .map((p: LlmProviderConfig) => `${p.id}:${p.model}`)
       .join(', ');

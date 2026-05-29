@@ -39,6 +39,7 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalL,
     maxWidth: '900px',
+    width: '100%',
   },
   titleRow: {
     display: 'flex',
@@ -61,6 +62,9 @@ const useStyles = makeStyles({
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
     gap: tokens.spacingVerticalM,
+    '@media (max-width: 600px)': {
+      gridTemplateColumns: '1fr',
+    },
   },
   statCard: {
     display: 'flex',
@@ -123,6 +127,10 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalM,
     alignItems: 'flex-end',
     flexWrap: 'wrap',
+    '@media (max-width: 600px)': {
+      flexDirection: 'column',
+      alignItems: 'stretch',
+    },
   },
   scrapeSnippet: {
     backgroundColor: tokens.colorNeutralBackground3,

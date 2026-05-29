@@ -14,7 +14,6 @@ import {
   Switch,
   Text,
   Button,
-  Tooltip,
   MessageBar,
   MessageBarBody,
   Field,
@@ -25,13 +24,12 @@ import {
   BrainCircuitRegular,
   CheckmarkCircleRegular,
   DismissCircleRegular,
-  InfoRegular,
   EditRegular,
   SaveRegular,
   DismissRegular,
 } from '@fluentui/react-icons';
 import { api, ApiError } from '../api/client.js';
-import type { SafeLlmProviderConfig, ProviderModels, ProviderUpdate } from '../api/types.js';
+import type { SafeLlmProviderConfig, ProviderModels, ProviderUpdate, ModelEntry } from '../api/types.js';
 
 const useStyles = makeStyles({
   root: {
@@ -117,6 +115,7 @@ interface TestState {
   success?: boolean;
   latencyMs?: number;
   error?: string;
+  result?: { changed: boolean; summary: string };
 }
 
 interface ProviderEditDraft {
@@ -219,6 +218,7 @@ export function ProvidersPage() {
           success: result.success,
           latencyMs: result.latencyMs,
           error: result.error,
+          result: result.result,
         },
       }));
     } catch (err) {
@@ -319,12 +319,22 @@ export function ProvidersPage() {
 
                 {modelsForProvider && !isEditing && (
                   <div>
-                    <Caption1 className={styles.metaLabel}>
+                    <Caption1 className={styles.metaLabel} style={{ marginBottom: tokens.spacingVerticalXS }}>
                       Available models ({modelsForProvider.models.length})
-                      <Tooltip content={modelsForProvider.models.join(', ')} relationship="label">
-                        <InfoRegular style={{ marginLeft: 4, verticalAlign: 'middle' }} />
-                      </Tooltip>
                     </Caption1>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalXS, marginTop: tokens.spacingVerticalXS }}>
+                      {modelsForProvider.models.map((m: ModelEntry) => (
+                        <Badge
+                          key={m.id}
+                          appearance={m.id === provider.model ? 'filled' : 'outline'}
+                          color={m.tier === 'free' ? 'success' : 'informative'}
+                          size="small"
+                          title={m.tier === 'free' ? 'Free tier' : 'Paid'}
+                        >
+                          {m.id}
+                        </Badge>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -338,8 +348,10 @@ export function ProvidersPage() {
                           setEditDraft((d) => d ? { ...d, model: e.target.value } : d)
                         }
                       >
-                        {(modelsForProvider?.models ?? [editDraft.model]).map((m) => (
-                          <option key={m} value={m}>{m}</option>
+                        {(modelsForProvider?.models ?? [{ id: editDraft.model, tier: 'paid' as const }]).map((m: ModelEntry) => (
+                          <option key={m.id} value={m.id}>
+                            {m.id} ({m.tier})
+                          </option>
                         ))}
                       </Select>
                     </Field>
@@ -456,9 +468,25 @@ export function ProvidersPage() {
                 {test && !test.loading && !isEditing && (
                   <div className={styles.testResult}>
                     {test.success ? (
-                      <Body1 style={{ color: tokens.colorStatusSuccessForeground1 }}>
-                        ✓ Connected — {test.latencyMs}ms
-                      </Body1>
+                      <>
+                        <Body1 style={{ color: tokens.colorStatusSuccessForeground1 }}>
+                          ✓ Connected — {test.latencyMs}ms
+                        </Body1>
+                        {test.result && (
+                          <div style={{ marginTop: tokens.spacingVerticalXS }}>
+                            <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>
+                              Model response:
+                            </Caption1>
+                            <div style={{ fontFamily: 'monospace', fontSize: tokens.fontSizeBase200, marginTop: '2px' }}>
+                              <span style={{ color: test.result.changed ? tokens.colorStatusWarningForeground1 : tokens.colorStatusSuccessForeground1 }}>
+                                changed: {String(test.result.changed)}
+                              </span>
+                              <br />
+                              <span>summary: "{test.result.summary}"</span>
+                            </div>
+                          </div>
+                        )}
+                      </>
                     ) : (
                       <Body1 style={{ color: tokens.colorStatusDangerForeground1 }}>
                         ✗ {test.error ?? 'Connection failed'}

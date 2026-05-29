@@ -1,5 +1,11 @@
 import Groq from 'groq-sdk';
-import { analyzeChanges, localFallbackAnalysis, type AnalysisResult } from './analyzer.js';
+import {
+  analyzeChanges,
+  localFallbackAnalysis,
+  MONITOR_SYSTEM_PROMPT,
+  buildMonitorUserPrompt,
+  type AnalysisResult,
+} from './analyzer.js';
 import type { LlmProviderConfig } from './config.js';
 
 export interface AnalysisResultWithMeta extends AnalysisResult {
@@ -27,29 +33,6 @@ export interface LlmAnalyzer {
 // ---------------------------------------------------------------------------
 // Groq adapter helpers
 // ---------------------------------------------------------------------------
-
-const MONITOR_SYSTEM_PROMPT = `You are a website change monitoring assistant. \
-Analyze differences between two versions of webpage content and identify meaningful changes. \
-Always respond with valid JSON only — no markdown fences, no extra text.`;
-
-function buildMonitorUserPrompt(url: string, oldContent: string, newContent: string): string {
-  return `Compare these two versions of a webpage and identify meaningful changes.
-
-URL: ${url}
-
---- PREVIOUS CONTENT (truncated to 3000 chars) ---
-${oldContent.slice(0, 3000)}
-
---- CURRENT CONTENT (truncated to 3000 chars) ---
-${newContent.slice(0, 3000)}
-
-Rules:
-- Ignore trivial differences (whitespace, punctuation, minor wording).
-- Focus on meaningful changes: new sections, price/availability changes, announcements, removed content.
-- Respond with JSON in exactly one of these two formats:
-  {"changed": true, "summary": "Short description of what changed"}
-  {"changed": false, "summary": "No meaningful changes detected"}`;
-}
 
 async function analyzeWithGroq(
   url: string,
