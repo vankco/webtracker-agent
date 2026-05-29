@@ -4,3 +4,5 @@ dist/
 state.json
 .browser-profile/
 config.json
+coverage/
+.vscode/
