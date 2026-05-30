@@ -12,6 +12,8 @@ import {
   filterHermesAvailableText,
   hermesProductsToText,
   parseHermesLine,
+  diffHermesProducts,
+  summarizeHermesDiff,
   formatHermesDiscordMessage,
   type HermesProduct,
 } from './scraper.js';
@@ -257,6 +259,45 @@ export class MonitorController {
       return;
     }
 
+    // -----------------------------------------------------------------------
+    // Hermès: deterministic structured diff — no LLM needed
+    // -----------------------------------------------------------------------
+    if (hermes) {
+      const diff = diffHermesProducts(previousAvailable, currentAvailable);
+      const summary = summarizeHermesDiff(diff);
+
+      log('info', 'monitor', 'Change detected (deterministic)', {
+        added: diff.added.length,
+        removed: diff.removed.length,
+        changed: diff.changed.length,
+      });
+
+      this.lastCheck = new Date().toISOString();
+      this.lastResult = {
+        changed: true,
+        summary,
+        provider: 'deterministic',
+        fallback: false,
+      };
+
+      if (config.notifications.discordWebhookUrl) {
+        const alertBody = formatHermesDiscordMessage(diff, currentAvailable.length);
+        const chunks = chunkSummaryForAlerts(alertBody);
+        for (const chunk of chunks) {
+          await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk);
+        }
+        log('info', 'monitor', `${chunks.length} alert(s) sent`, { summary });
+      }
+
+      this.deps.saveState({
+        url: target.url,
+        lastContent: currentContent,
+        lastChecked: new Date().toISOString(),
+        lastProducts: currentProducts!,
+      });
+      return;
+    }
+
     log('info', 'llm', 'Sending to LLM providers', {
       providers: providers.map(p => `${p.id}:${p.model}`),
       oldLength: previousTrackable.length,
@@ -292,12 +333,7 @@ export class MonitorController {
     };
 
     if (analysisResult.changed) {
-      // For Hermès: build structured diff message instead of raw LLM prose
-      const alertBody = hermes
-        ? formatHermesDiscordMessage(previousAvailable, currentAvailable, analysisResult.summary)
-        : analysisResult.summary;
-
-      const chunks = chunkSummaryForAlerts(alertBody);
+      const chunks = chunkSummaryForAlerts(analysisResult.summary);
       for (const chunk of chunks) {
         await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk);
       }
@@ -306,12 +342,11 @@ export class MonitorController {
       console.log(`[monitor] No meaningful change: ${analysisResult.summary}`);
     }
 
-    // Save full content + structured products to state
+    // Save full content to state
     this.deps.saveState({
       url: target.url,
       lastContent: currentContent,
       lastChecked: new Date().toISOString(),
-      ...(hermes ? { lastProducts: currentProducts! } : {}),
     });
   }
 
