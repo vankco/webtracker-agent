@@ -9,6 +9,7 @@ import {
   DataUsageRegular,
   SettingsRegular,
   BrainCircuitRegular,
+  BugRegular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -123,6 +124,7 @@ const NAV_ITEMS: NavItemDef[] = [
   { to: '/', label: 'Monitor', icon: <DataUsageRegular />, exact: true },
   { to: '/providers', label: 'Providers', icon: <BrainCircuitRegular /> },
   { to: '/config', label: 'Config', icon: <SettingsRegular /> },
+  { to: '/debug', label: 'Debug Log', icon: <BugRegular /> },
 ];
 
 export function NavSidebar() {

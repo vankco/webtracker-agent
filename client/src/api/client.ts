@@ -21,6 +21,7 @@ import type {
   StopMonitorResponse,
   ValidateScrapeRequest,
   ValidateScrapeResponse,
+  GetLogsResponse,
 } from './types.js';
 
 const BASE = '/api';
@@ -106,5 +107,13 @@ export const api = {
   validate: {
     scrape: (body: ValidateScrapeRequest): Promise<ValidateScrapeResponse> =>
       request('POST', '/validate/scrape', body),
+  },
+
+  logs: {
+    get: (): Promise<GetLogsResponse> =>
+      request('GET', '/logs'),
+
+    clear: (): Promise<{ cleared: boolean }> =>
+      request('DELETE', '/logs'),
   },
 } as const;

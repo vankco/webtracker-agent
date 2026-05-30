@@ -13,6 +13,7 @@ import {
   type AppConfig,
   type ConfigStore,
 } from './config.js';
+import { log } from './logger.js';
 import type {
   MonitorStatus,
   LastCheckResult,
@@ -97,13 +98,14 @@ export class MonitorController {
 
     this.running = true;
     const config = configStore.get();
+    log('info', 'monitor', 'Monitor started', { url: config.target.url, intervalMs: config.schedule.intervalMs });
 
     // Run immediately
     try {
       await this.runCheck(config);
     } catch (err) {
       this.recordError(err);
-      console.error('[monitor] Initial check failed:', err);
+      log('error', 'monitor', 'Initial check failed', { error: err instanceof Error ? err.message : String(err) });
     }
 
     if (config.schedule.runOnce) {
@@ -135,6 +137,7 @@ export class MonitorController {
     }
     this.running = false;
     this.nextCheck = undefined;
+    log('info', 'monitor', 'Monitor stopped');
     await this.deps.closeScraperSession();
   }
 
@@ -159,9 +162,15 @@ export class MonitorController {
     const { target, browser } = config;
     const providers = getEnabledProvidersByPriority(config);
 
-    console.log(`[monitor] Checking: ${target.url}`);
+    log('info', 'scrape', `Fetching ${target.url}`, { selector: target.selector || '(none)' });
+    const scrapeStart = Date.now();
 
     const currentContent = await this.deps.scrapePageText(target.url, target.selector, browser);
+    log('info', 'scrape', `Fetch complete`, {
+      url: target.url,
+      contentLength: currentContent.length,
+      latencyMs: Date.now() - scrapeStart,
+    });
 
     // Record snapshot (newest first, keep last 2)
     this.recentSnapshots = [
@@ -173,7 +182,7 @@ export class MonitorController {
       const msg = target.selector
         ? `Scrape returned empty content — selector "${target.selector}" may not match anything on ${target.url}`
         : `Scrape returned empty content — ${target.url} may have blocked the request or failed to load`;
-      console.warn(`[monitor] ⚠ ${msg}`);
+      log('warn', 'scrape', msg, { url: target.url, selector: target.selector });
       this.recordError(new Error(msg));
       if (config.notifications.discordWebhookUrl) {
         await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, `⚠️ ${msg}`);
@@ -208,12 +217,28 @@ export class MonitorController {
       return;
     }
 
+    log('info', 'llm', 'Sending to LLM providers', {
+      providers: providers.map(p => `${p.id}:${p.model}`),
+      oldLength: previousState.lastContent.length,
+      newLength: currentContent.length,
+    });
+    const llmStart = Date.now();
+
     const analysisResult: AnalysisResultWithMeta = await this.deps.analyzeWithProviders(
       target.url,
       previousState.lastContent,
       currentContent,
       providers
     );
+
+    log(analysisResult.fallback ? 'warn' : 'info', 'llm', `Analysis complete`, {
+      provider: analysisResult.provider ?? 'local-fallback',
+      model: analysisResult.model,
+      changed: analysisResult.changed,
+      fallback: analysisResult.fallback,
+      latencyMs: Date.now() - llmStart,
+      summary: analysisResult.summary.slice(0, 200),
+    });
 
     this.lastCheck = new Date().toISOString();
     this.lastResult = {
@@ -244,6 +269,7 @@ export class MonitorController {
     if (this.recentErrors.length > MAX_ERRORS) {
       this.recentErrors.shift();
     }
+    log('error', 'monitor', message);
   }
 }
 

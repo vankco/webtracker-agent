@@ -19,6 +19,7 @@ import {
   type LlmProviderId,
 } from './config.js';
 import { MonitorController } from './monitor-controller.js';
+import { getLogs, clearLogs } from './logger.js';
 import { defaultLlmAnalyzer } from './llm.js';
 import { scrapePageText } from './scraper.js';
 import type {
@@ -377,6 +378,21 @@ export function createApiRouter(
   });
 
   // -------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // GET /api/logs
+  // -------------------------------------------------------------------------
+  router.get('/logs', (_req: Request, res: Response) => {
+    ok(res, getLogs());
+  });
+
+  // -------------------------------------------------------------------------
+  // DELETE /api/logs
+  // -------------------------------------------------------------------------
+  router.delete('/logs', (_req: Request, res: Response) => {
+    clearLogs();
+    ok(res, { cleared: true });
+  });
+
   // POST /api/validate/scrape
   // -------------------------------------------------------------------------
   router.post('/validate/scrape', async (req: Request, res: Response) => {

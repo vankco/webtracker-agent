@@ -197,6 +197,24 @@ export interface MonitorStatus {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/logs
+// ---------------------------------------------------------------------------
+
+export type LogLevel = 'info' | 'warn' | 'error';
+export type LogCategory = 'scrape' | 'llm' | 'monitor' | 'config' | 'system';
+
+export interface LogEntry {
+  id: number;
+  timestamp: string;
+  level: LogLevel;
+  category: LogCategory;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+export type GetLogsResponse = LogEntry[];
+
+// ---------------------------------------------------------------------------
 // POST /api/validate/scrape
 // ---------------------------------------------------------------------------
 

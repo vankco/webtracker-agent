@@ -135,6 +135,24 @@ export interface MonitorError {
   message: string;
 }
 
+// ---------------------------------------------------------------------------
+// GET /api/logs
+// ---------------------------------------------------------------------------
+
+export type LogLevel = 'info' | 'warn' | 'error';
+export type LogCategory = 'scrape' | 'llm' | 'monitor' | 'config' | 'system';
+
+export interface LogEntry {
+  id: number;
+  timestamp: string;
+  level: LogLevel;
+  category: LogCategory;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+export type GetLogsResponse = LogEntry[];
+
 export interface ContentSnapshot {
   fetchedAt: string;
   preview: string;
