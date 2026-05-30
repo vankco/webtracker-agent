@@ -159,6 +159,20 @@ export class MonitorController {
     console.log(`[monitor] Checking: ${target.url}`);
 
     const currentContent = await this.deps.scrapePageText(target.url, target.selector, browser);
+
+    if (!currentContent.trim()) {
+      const msg = target.selector
+        ? `Scrape returned empty content — selector "${target.selector}" may not match anything on ${target.url}`
+        : `Scrape returned empty content — ${target.url} may have blocked the request or failed to load`;
+      console.warn(`[monitor] ⚠ ${msg}`);
+      this.recordError(new Error(msg));
+      if (config.notifications.discordWebhookUrl) {
+        await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, `⚠️ ${msg}`);
+      }
+      this.lastCheck = new Date().toISOString();
+      return;
+    }
+
     const previousState = this.deps.loadState();
 
     if (!previousState) {
