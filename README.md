@@ -7,10 +7,12 @@ AI-powered website change monitor. Watches a page for meaningful changes and sen
 ## How it works
 
 1. Playwright scrapes the target page on a schedule
-2. If the content changed, it's sent to an LLM (Gemini or Groq) for analysis
-3. The LLM decides if the change is meaningful and writes a summary
-4. A Discord alert is sent with the summary
-5. If all LLM providers fail, a local text-diff fallback is used
+2. If the content changed:
+   - **Hermès URLs** — a deterministic structured diff is computed (no LLM). Added, removed, and price-changed products are identified by SKU and sent directly to Discord.
+   - **All other URLs** — the old and new content are sent to an LLM (Gemini or Groq) for analysis. The LLM decides if the change is meaningful and writes a summary.
+3. A Discord alert is sent with the result
+4. If all LLM providers fail, a local text-diff fallback is used (generic sites only)
+5. On first run with no prior state, Hermès sends a baseline alert listing all currently available products
 
 ---
 
@@ -110,6 +112,12 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 ---
 
 ## Using the UI
+
+### Debug Log page
+
+- **Live event log** — every scrape, LLM call, alert, and error is recorded with a timestamp and log level
+- **Filter by level** — filter to `info`, `warn`, or `error` events
+- **Auto-scroll** — newest events appear at the bottom; scrolls automatically unless you scroll up
 
 ### Monitor page
 
@@ -226,9 +234,10 @@ src/
 
 client/
   src/pages/
-    MonitorPage.tsx  — monitor controls and status
+    MonitorPage.tsx   — monitor controls and status
     ProvidersPage.tsx — LLM provider management
-    ConfigPage.tsx   — app configuration
+    ConfigPage.tsx    — app configuration
+    DebugLogPage.tsx  — live structured event log
 
 config.json          — your local config (gitignored)
 config.json.example  — template to copy from
