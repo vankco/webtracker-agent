@@ -15,6 +15,7 @@ import {
   diffHermesProducts,
   summarizeHermesDiff,
   formatHermesDiscordMessage,
+  formatHermesBaselineMessage,
   type HermesProduct,
 } from './scraper.js';
 import { sendDiscordAlert } from './notifier.js';
@@ -218,7 +219,16 @@ export class MonitorController {
     const previousState = this.deps.loadState();
 
     if (!previousState) {
-      console.log('[monitor] No previous state — saving baseline. Alerts start next run.');
+      if (hermes && config.notifications.discordWebhookUrl) {
+        const alertBody = formatHermesBaselineMessage(currentAvailable);
+        const chunks = chunkSummaryForAlerts(alertBody);
+        for (const chunk of chunks) {
+          await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk);
+        }
+        log('info', 'monitor', 'Baseline alert sent', { available: currentAvailable.length });
+      } else {
+        log('info', 'monitor', 'No previous state — saving baseline. Alerts start next run.');
+      }
       this.deps.saveState({
         url: target.url,
         lastContent: currentContent,

@@ -199,6 +199,14 @@ export function formatHermesDiscordMessage(
   return `${body}${summary}\n\n${stats}`;
 }
 
+export function formatHermesBaselineMessage(available: HermesProduct[]): string {
+  if (available.length === 0) {
+    return `🟡 **Hermès baseline saved — no products currently available.**`;
+  }
+  const lines = available.map(productLine).join('\n');
+  return `🟢 **Hermès baseline — ${available.length} currently available:**\n${lines}`;
+}
+
 export async function closeScraperSession(): Promise<void> {
   if (persistentContext) {
     await persistentContext.close().catch(() => {
