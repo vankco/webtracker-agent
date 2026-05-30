@@ -33,12 +33,16 @@ const useStyles = makeStyles({
   main: {
     flex: 1,
     overflowY: 'auto',
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    WebkitOverflowScrolling: 'touch' as any, // smooth scroll on iOS
     padding: tokens.spacingVerticalXL,
     paddingLeft: tokens.spacingHorizontalXL,
     paddingRight: tokens.spacingHorizontalXL,
     '@media (max-width: 600px)': {
-      padding: tokens.spacingVerticalM,
-      paddingBottom: '72px', // room for bottom nav
+      paddingTop: tokens.spacingVerticalM,
+      paddingLeft: tokens.spacingVerticalM,
+      paddingRight: tokens.spacingVerticalM,
+      paddingBottom: '100px', // enough room above fixed bottom nav
     },
   },
 });

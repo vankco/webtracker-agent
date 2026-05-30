@@ -80,7 +80,7 @@ describe('E2E: first run saves baseline', () => {
     const configStore = new ConfigStore(config);
     const { deps, stateStore, alertsSent } = makeDeps();
     const controller = new MonitorController(deps);
-    const app = createApiApp(configStore, controller);
+    const app = createApiApp(configStore, controller, () => {});
 
     const startRes = await request(app).post('/api/monitor/start').send({});
     expect(startRes.status).toBe(202);
@@ -104,7 +104,7 @@ describe('E2E: same content skips LLM', () => {
     const configStore = new ConfigStore(config);
     const { deps, stateStore } = makeDeps();
     const controller = new MonitorController(deps);
-    const app = createApiApp(configStore, controller);
+    const app = createApiApp(configStore, controller, () => {});
 
     // Prime with existing state (same content as scrape will return)
     stateStore.state = {
@@ -130,7 +130,7 @@ describe('E2E: changed content triggers LLM and alert', () => {
     const configStore = new ConfigStore(config);
     const { deps, stateStore, alertsSent, scrapeContent, analyzeResult } = makeDeps();
     const controller = new MonitorController(deps);
-    const app = createApiApp(configStore, controller);
+    const app = createApiApp(configStore, controller, () => {});
 
     stateStore.state = {
       url: 'https://e2e.example.com',
@@ -155,7 +155,7 @@ describe('E2E: changed content triggers LLM and alert', () => {
     const configStore = new ConfigStore(config);
     const { deps, stateStore, scrapeContent, analyzeResult } = makeDeps();
     const controller = new MonitorController(deps);
-    const app = createApiApp(configStore, controller);
+    const app = createApiApp(configStore, controller, () => {});
 
     stateStore.state = {
       url: 'https://e2e.example.com',
@@ -196,7 +196,7 @@ describe('E2E: Gemini fails, Groq takes over', () => {
     });
 
     const controller = new MonitorController(deps);
-    const app = createApiApp(configStore, controller);
+    const app = createApiApp(configStore, controller, () => {});
 
     stateStore.state = {
       url: 'https://e2e.example.com',
@@ -235,7 +235,7 @@ describe('E2E: all LLM providers fail → local fallback', () => {
     });
 
     const controller = new MonitorController(deps);
-    const app = createApiApp(configStore, controller);
+    const app = createApiApp(configStore, controller, () => {});
 
     stateStore.state = {
       url: 'https://e2e.example.com',
@@ -272,7 +272,7 @@ describe('E2E: long summary is chunked into multiple alerts', () => {
     });
 
     const controller = new MonitorController(deps);
-    const app = createApiApp(configStore, controller);
+    const app = createApiApp(configStore, controller, () => {});
 
     stateStore.state = {
       url: 'https://e2e.example.com',
@@ -299,7 +299,7 @@ describe('E2E: stop is idempotent / double-stop returns 409', () => {
     const config = makeFullConfig();
     const configStore = new ConfigStore(config);
     const controller = new MonitorController(makeDeps().deps);
-    const app = createApiApp(configStore, controller);
+    const app = createApiApp(configStore, controller, () => {});
 
     const res = await request(app).post('/api/monitor/stop').send({});
     expect(res.status).toBe(409);
@@ -310,7 +310,7 @@ describe('E2E: stop is idempotent / double-stop returns 409', () => {
     const config = makeFullConfig();
     const configStore = new ConfigStore(config);
     const controller = new MonitorController(makeDeps().deps);
-    const app = createApiApp(configStore, controller);
+    const app = createApiApp(configStore, controller, () => {});
 
     await request(app).post('/api/monitor/start').send({});
     await new Promise((r) => setTimeout(r, 10));
@@ -329,7 +329,7 @@ describe('E2E: runtime config update', () => {
     const config = makeFullConfig();
     const configStore = new ConfigStore(config);
     const controller = new MonitorController(makeDeps().deps);
-    const app = createApiApp(configStore, controller);
+    const app = createApiApp(configStore, controller, () => {});
 
     await request(app)
       .put('/api/config')
@@ -353,7 +353,7 @@ describe('E2E: scrape errors appear in status.errors', () => {
     vi.mocked(deps.scrapePageText).mockRejectedValue(new Error('Navigation timeout'));
 
     const controller = new MonitorController(deps);
-    const app = createApiApp(configStore, controller);
+    const app = createApiApp(configStore, controller, () => {});
 
     await request(app).post('/api/monitor/start').send({});
     await new Promise((r) => setTimeout(r, 30));

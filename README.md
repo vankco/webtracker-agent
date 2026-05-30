@@ -1,0 +1,222 @@
+# WebTracker Agent
+
+AI-powered website change monitor. Watches a page for meaningful changes and sends a Discord alert when something important happens.
+
+---
+
+## How it works
+
+1. Playwright scrapes the target page on a schedule
+2. If the content changed, it's sent to an LLM (Gemini or Groq) for analysis
+3. The LLM decides if the change is meaningful and writes a summary
+4. A Discord alert is sent with the summary
+5. If all LLM providers fail, a local text-diff fallback is used
+
+---
+
+## Requirements
+
+- Node.js 20+
+- A [Gemini API key](https://aistudio.google.com/app/apikey) (free tier available)
+- A [Groq API key](https://console.groq.com) (optional, used as failover)
+- A Discord webhook URL
+
+---
+
+## Setup
+
+### 1. Install dependencies
+
+```bash
+npm install
+cd client && npm install && cd ..
+```
+
+### 2. Create your config file
+
+```bash
+cp config.json.example config.json
+```
+
+Edit `config.json` with your real values:
+
+```json
+{
+  "targetUrl": "https://example.com",
+  "targetSelector": "",
+  "checkIntervalMs": 300000,
+  "runOnce": false,
+  "discordWebhookUrl": "https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN",
+  "apiPort": 3001,
+
+  "llm": {
+    "gemini": {
+      "enabled": true,
+      "apiKey": "YOUR_GEMINI_API_KEY",
+      "model": "gemini-2.5-flash",
+      "priority": 1,
+      "timeoutMs": 30000,
+      "maxRetries": 1
+    },
+    "groq": {
+      "enabled": false,
+      "apiKey": "",
+      "model": "llama-3.3-70b-versatile",
+      "priority": 2,
+      "timeoutMs": 30000,
+      "maxRetries": 1
+    }
+  },
+
+  "browser": {
+    "headless": true,
+    "persistSession": true,
+    "userDataDir": ".browser-profile",
+    "gotoTimeoutMs": 60000
+  }
+}
+```
+
+> `config.json` is gitignored — your secrets never get committed.
+
+---
+
+## Starting the app
+
+### API + UI together (recommended)
+
+```bash
+npm run dev:all
+```
+
+- API runs on `http://localhost:3001`
+- UI runs on `http://localhost:5173`
+
+### API only
+
+```bash
+npm run api:dev
+```
+
+### Accessible from other devices (phone/tablet)
+
+```bash
+npm run api:dev &
+cd client && npm run dev -- --host
+```
+
+Then open `http://<your-ip>:5173` on any device on the same network.
+
+---
+
+## Using the UI
+
+### Monitor page
+
+- **Start / Stop** — starts or stops the monitoring loop
+- **Last Check / Next Check** — when the last check ran and when the next is scheduled
+- **Last Result** — the LLM's analysis from the most recent check
+- **Recent Errors** — scrape failures, empty content warnings, etc.
+- **Schedule Controls** — change the check interval or enable run-once mode without restarting
+- **Scrape Validator** — test a URL + CSS selector before starting the monitor; shows a content preview and character count
+
+### Providers page
+
+- **Enable / Disable** each LLM provider with the toggle
+- **Edit** — change the model, API key, priority, timeout, and retries
+- **Test connection** — sends a real request to the provider and shows the response
+- **Available models** — expandable list of all models for that provider with free/paid badges
+- **Priority** — lower number = tried first. If priority 1 fails, priority 2 is tried automatically
+
+### Config page
+
+- **Target** — the URL to monitor and an optional CSS selector to focus on a specific part of the page
+- **Schedule** — check interval in seconds and run-once mode
+- **Notifications** — Discord webhook URL (write-only, never echoed back)
+- **Browser** — read-only view of browser settings (set these in `config.json`)
+
+---
+
+## Configuration reference
+
+| Field | Default | Description |
+|---|---|---|
+| `targetUrl` | — | The page to monitor (required) |
+| `targetSelector` | `""` | CSS selector to focus on (e.g. `main`, `#prices`). Empty = full page |
+| `checkIntervalMs` | `300000` | How often to check in ms (5 minutes) |
+| `runOnce` | `false` | Run one check and exit |
+| `discordWebhookUrl` | — | Discord webhook for alerts (required) |
+| `apiPort` | `3001` | Port for the REST API server |
+| `llm.gemini.priority` | `1` | Lower = tried first |
+| `llm.groq.priority` | `2` | Used as failover when Gemini fails |
+| `browser.headless` | `true` | Run browser without a visible window |
+| `browser.persistSession` | `true` | Reuse cookies/login state between runs |
+| `browser.userDataDir` | `.browser-profile` | Where browser session data is stored |
+
+---
+
+## LLM provider failover
+
+Providers are tried in priority order (lowest number first):
+
+1. Gemini is called
+2. If Gemini fails → Groq is tried
+3. If all providers fail → local text-diff fallback is used (no LLM call)
+
+The fallback always produces a result — the monitor never crashes due to LLM failure.
+
+---
+
+## CSS selector tips
+
+Use the browser DevTools inspector to find the right selector:
+
+- `main` — main content area
+- `#prices` — element with id="prices"
+- `.product-grid` — elements with class="product-grid"
+- `div.hero-product` — div with class="hero-product"
+
+Leave blank to monitor the entire page body.
+
+---
+
+## For sites that require login
+
+Set `browser.manualAssisted: true` in `config.json`. On first run a browser window opens and waits 2 minutes for you to log in manually. The session is saved to `.browser-profile` and reused automatically on all future runs.
+
+---
+
+## Running tests
+
+```bash
+npm test                # run once
+npm run test:watch      # watch mode
+npm run test:coverage   # with coverage report (≥80% required)
+```
+
+---
+
+## Project structure
+
+```
+src/
+  agent.ts           — entry point, starts API server or CLI loop
+  api.ts             — Express REST API (10 endpoints)
+  config.ts          — config loading (config.json → env → defaults)
+  monitor-controller.ts — monitor loop lifecycle (start/stop/status)
+  llm.ts             — LLM provider orchestration and failover
+  analyzer.ts        — Gemini adapter + local diff fallback
+  scraper.ts         — Playwright browser automation
+  notifier.ts        — Discord webhook alerts
+  state.ts           — persist last scrape to state.json
+  api-types.ts       — shared TypeScript types for the API
+
+client/
+  src/pages/
+    MonitorPage.tsx  — monitor controls and status
+    ProvidersPage.tsx — LLM provider management
+    ConfigPage.tsx   — app configuration
+
+config.json          — your local config (gitignored)
+config.json.example  — template to copy from
+```

@@ -138,7 +138,8 @@ async function warmModelCache(config: AppConfig): Promise<void> {
 
 export function createApiRouter(
   configStore: ConfigStore,
-  monitorController: MonitorController
+  monitorController: MonitorController,
+  persistConfig: (config: AppConfig) => void = saveJsonConfig
 ): express.Router {
   const router = express.Router();
 
@@ -191,7 +192,7 @@ export function createApiRouter(
     }
 
     configStore.update(update);
-    saveJsonConfig(configStore.get());
+    persistConfig(configStore.get());
     ok(res, configStore.getSafe());
   });
 
@@ -249,7 +250,7 @@ export function createApiRouter(
     }
 
     configStore.update({ llmProviders: Array.from(providerMap.values()) });
-    saveJsonConfig(configStore.get());
+    persistConfig(configStore.get());
     ok(res, configStore.getSafe().llmProviders);
   });
 
@@ -419,7 +420,8 @@ export function createApiRouter(
 
 export function createApiApp(
   configStore: ConfigStore,
-  monitorController: MonitorController
+  monitorController: MonitorController,
+  persistConfig: (config: AppConfig) => void = saveJsonConfig
 ): express.Application {
   const app = express();
 
@@ -430,7 +432,7 @@ export function createApiApp(
   void warmModelCache(configStore.get());
 
   // Mount all routes under /api
-  app.use('/api', createApiRouter(configStore, monitorController));
+  app.use('/api', createApiRouter(configStore, monitorController, persistConfig));
 
   // 404 handler for unmatched /api routes
   app.use('/api', (_req: Request, res: Response) => {

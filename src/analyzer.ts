@@ -210,8 +210,8 @@ export async function analyzeChanges(
     const json = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
     return JSON.parse(json) as AnalysisResult;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`Gemini analysis failed (${message}). Falling back to local text-diff analysis.`);
-    return localFallbackAnalysis(oldContent, newContent);
+    // Re-throw so analyzeWithProviders can try the next provider (e.g. Groq)
+    // instead of silently falling back to local diff here.
+    throw err;
   }
 }

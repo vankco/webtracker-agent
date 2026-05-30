@@ -37,11 +37,15 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalL,
     maxWidth: '900px',
+    width: '100%',
   },
   providerGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))',
     gap: tokens.spacingVerticalM,
+    '@media (max-width: 600px)': {
+      gridTemplateColumns: '1fr',
+    },
   },
   providerCard: {
     display: 'flex',
@@ -102,6 +106,8 @@ const useStyles = makeStyles({
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: tokens.spacingHorizontalS,
   },
 });
 
@@ -318,10 +324,12 @@ export function ProvidersPage() {
                 )}
 
                 {modelsForProvider && !isEditing && (
-                  <div>
-                    <Caption1 className={styles.metaLabel} style={{ marginBottom: tokens.spacingVerticalXS }}>
-                      Available models ({modelsForProvider.models.length})
-                    </Caption1>
+                  <details>
+                    <summary style={{ cursor: 'pointer', listStyle: 'none' }}>
+                      <Caption1 className={styles.metaLabel}>
+                        Available models ({modelsForProvider.models.length}) ▸
+                      </Caption1>
+                    </summary>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalXS, marginTop: tokens.spacingVerticalXS }}>
                       {modelsForProvider.models.map((m: ModelEntry) => (
                         <Badge
@@ -335,7 +343,7 @@ export function ProvidersPage() {
                         </Badge>
                       ))}
                     </div>
-                  </div>
+                  </details>
                 )}
 
                 {/* Inline edit form */}

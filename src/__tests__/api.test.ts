@@ -55,7 +55,7 @@ function makeFullConfig() {
 function makeApp() {
   const configStore = new ConfigStore(makeFullConfig());
   const monitorController = new MonitorController();
-  return { app: createApiApp(configStore, monitorController), configStore, monitorController };
+  return { app: createApiApp(configStore, monitorController, () => {}), configStore, monitorController };
 }
 
 // ---------------------------------------------------------------------------
@@ -210,7 +210,7 @@ describe('POST /api/monitor/start', () => {
   it('returns 422 when config is incomplete', async () => {
     const configStore = new ConfigStore(loadAppConfigLenient({})); // no URL etc.
     const monitorController = new MonitorController();
-    const app = createApiApp(configStore, monitorController);
+    const app = createApiApp(configStore, monitorController, () => {});
 
     const res = await request(app).post('/api/monitor/start').send({});
     expect(res.status).toBe(422);
