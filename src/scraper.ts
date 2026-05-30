@@ -75,6 +75,130 @@ async function getOrCreateSessionPage(
   return persistentPage;
 }
 
+// ---------------------------------------------------------------------------
+// Hermès-specific product extractor
+// ---------------------------------------------------------------------------
+
+export function isHermesUrl(url: string): boolean {
+  return url.includes('hermes.com');
+}
+
+export interface HermesProduct {
+  name: string;
+  color: string;
+  price: string;
+  sku: string;
+  available: boolean;
+  url: string; // relative path e.g. /us/en/product/balusoie-bag-H086920CKAB/
+}
+
+/**
+ * Extracts all product items from a Hermès category page as structured data.
+ */
+async function extractHermesProducts(page: Page): Promise<HermesProduct[]> {
+  return page.evaluate(() => {
+    return Array.from(document.querySelectorAll('div.product-item')).map((item) => {
+      const linkEl = item.querySelector('a.product-item-name');
+      const name = item.querySelector('span.product-title')?.textContent?.trim() ?? '';
+      const titleAttr = linkEl?.getAttribute('title') ?? '';
+      const color = titleAttr.includes(',') ? titleAttr.split(',').slice(1).join(',').trim() : '';
+      const priceEl = item.querySelector('span.price.notranslate');
+      const price = priceEl ? (priceEl.textContent ?? '').replace(/\s+/g, ' ').trim() : '';
+      const sku = ((item.querySelector('div.product-item-meta') as HTMLElement | null)
+        ?.id ?? '').replace('product-item-meta-', '');
+      const available = !item.querySelector('h-out-of-stock-label');
+      const url = linkEl?.getAttribute('href') ?? '';
+      return { name, color, price, sku, available, url };
+    });
+  });
+}
+
+/** Serialize product array to one line per product for state storage and LLM comparison. */
+export function hermesProductsToText(products: HermesProduct[]): string {
+  return products
+    .map(p => `${p.name} | ${p.color} | ${p.price} | SKU:${p.sku} | ${p.available ? 'Available' : 'Unavailable'} | ${p.url}`)
+    .join('\n');
+}
+
+/** Parse a single serialized product line back into a structured object. */
+export function parseHermesLine(line: string): HermesProduct {
+  const parts = line.split(' | ');
+  return {
+    name:      parts[0]?.trim() ?? '',
+    color:     parts[1]?.trim() ?? '',
+    price:     parts[2]?.trim() ?? '',
+    sku:       (parts[3]?.trim() ?? '').replace('SKU:', ''),
+    available: parts[4]?.trim() === 'Available',
+    url:       parts[5]?.trim() ?? '',
+  };
+}
+
+/**
+ * Filters a product array to available items only.
+ * Used to scope LLM change detection to available products only.
+ */
+export function filterHermesAvailable(products: HermesProduct[]): HermesProduct[] {
+  return products.filter((p) => p.available);
+}
+
+/**
+ * Fallback: filter serialized string content to available lines only.
+ * Used when loading legacy state.json entries that predate lastProducts.
+ */
+export function filterHermesAvailableText(content: string): string {
+  return content.split('\n').filter((l) => l.includes('| Available')).join('\n');
+}
+
+const HERMES_BASE = 'https://www.hermes.com';
+
+function productLine(p: HermesProduct): string {
+  const link = p.url ? `[${p.name}](${HERMES_BASE}${p.url})` : `**${p.name}**`;
+  return `• ${link} — ${p.color} — ${p.price} — \`${p.sku}\``;
+}
+
+/**
+ * Builds a structured Discord markdown message by diffing two available-product arrays.
+ */
+export function formatHermesDiscordMessage(
+  oldProducts: HermesProduct[],
+  newProducts: HermesProduct[],
+  llmSummary: string
+): string {
+
+  const oldMap = new Map(oldProducts.map(p => [p.sku, p]));
+  const newMap = new Map(newProducts.map(p => [p.sku, p]));
+
+  const added   = newProducts.filter(p => !oldMap.has(p.sku));
+  const removed = oldProducts.filter(p => !newMap.has(p.sku));
+  const changed = newProducts
+    .filter(p => oldMap.has(p.sku))
+    .map(p => ({ old: oldMap.get(p.sku)!, new: p }))
+    .filter(({ old: o, new: n }) => o.price !== n.price || o.color !== n.color || o.name !== n.name);
+
+  const sections: string[] = [];
+
+  if (added.length > 0) {
+    sections.push(`➕ **Newly Available (${added.length})**\n${added.map(productLine).join('\n')}`);
+  }
+  if (removed.length > 0) {
+    sections.push(`➖ **No Longer Available (${removed.length})**\n${removed.map(productLine).join('\n')}`);
+  }
+  if (changed.length > 0) {
+    const changedLines = changed.map(({ old: o, new: n }) => {
+      const link = n.url ? `[${n.name}](${HERMES_BASE}${n.url})` : `**${n.name}**`;
+      const priceDiff = o.price !== n.price ? ` ~~${o.price}~~ → **${n.price}**` : ` ${n.price}`;
+      return `• ${link} — ${n.color}${priceDiff} — \`${n.sku}\``;
+    });
+    sections.push(`💰 **Updated (${changed.length})**\n${changedLines.join('\n')}`);
+  }
+
+  const stats = `📊 ${newProducts.length} available total`;
+  const body = sections.join('\n\n');
+  const summary = llmSummary ? `\n\n💬 *${llmSummary.slice(0, 300)}*` : '';
+
+  return `${body}${summary}\n\n${stats}`;
+}
+
 export async function closeScraperSession(): Promise<void> {
   if (persistentContext) {
     await persistentContext.close().catch(() => {
@@ -184,16 +308,25 @@ export async function scrapePageText(
       await dismissNotificationBanner(page);
     }
 
-    const target = selector && selector.trim() ? selector.trim() : 'body';
-    const text = await page.$eval(target, (el) => (el as HTMLElement).innerText);
+    let text: string;
+
+    if (isHermesUrl(url)) {
+      // Extract structured product data, then serialize to text for storage/comparison
+      const products = await extractHermesProducts(page);
+      text = hermesProductsToText(products);
+    } else {
+      const target = selector && selector.trim() ? selector.trim() : 'body';
+      text = await page.$eval(target, (el) => (el as HTMLElement).innerText);
+      // Normalize whitespace so minor formatting changes don't trigger false positives
+      text = text.replace(/\s+/g, ' ').trim();
+    }
 
     // Optional debug pause so you can visually inspect the page in headed mode.
     if (!headless && keepOpenMs > 0 && !persistentSession) {
       await page.waitForTimeout(keepOpenMs);
     }
 
-    // Normalize whitespace so minor formatting changes don't trigger false positives
-    return text.replace(/\s+/g, ' ').trim();
+    return text;
   } finally {
     if (browser) {
       await browser.close();

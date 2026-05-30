@@ -4,7 +4,17 @@
  * Designed to be injectable so the API server and CLI share the same instance.
  */
 
-import { scrapePageText, closeScraperSession } from './scraper.js';
+import {
+  scrapePageText,
+  closeScraperSession,
+  isHermesUrl,
+  filterHermesAvailable,
+  filterHermesAvailableText,
+  hermesProductsToText,
+  parseHermesLine,
+  formatHermesDiscordMessage,
+  type HermesProduct,
+} from './scraper.js';
 import { sendDiscordAlert } from './notifier.js';
 import { loadState, saveState } from './state.js';
 import { analyzeWithProviders, type AnalysisResultWithMeta } from './llm.js';
@@ -166,10 +176,22 @@ export class MonitorController {
     const scrapeStart = Date.now();
 
     const currentContent = await this.deps.scrapePageText(target.url, target.selector, browser);
+
+    const hermes = isHermesUrl(target.url);
+
+    // For Hermès: parse structured products and derive available subset
+    const currentProducts: HermesProduct[] | null = hermes
+      ? currentContent.split('\n').filter(Boolean).map(parseHermesLine)
+      : null;
+    const currentAvailable: HermesProduct[] = hermes
+      ? filterHermesAvailable(currentProducts!)
+      : [];
+
     log('info', 'scrape', `Fetch complete`, {
       url: target.url,
       contentLength: currentContent.length,
       latencyMs: Date.now() - scrapeStart,
+      ...(hermes ? { totalProducts: currentProducts!.length, availableProducts: currentAvailable.length } : {}),
     });
 
     // Record snapshot (newest first, keep last 2)
@@ -199,18 +221,36 @@ export class MonitorController {
         url: target.url,
         lastContent: currentContent,
         lastChecked: new Date().toISOString(),
+        ...(hermes ? { lastProducts: currentProducts! } : {}),
       });
       this.lastCheck = new Date().toISOString();
       return;
     }
 
-    if (currentContent === previousState.lastContent) {
-      console.log('[monitor] No change (exact text match — skipped LLM analysis).');
-      this.deps.saveState({ url: target.url, lastContent: currentContent, lastChecked: new Date().toISOString() });
+    // Resolve previous available products — use stored array if present, else parse from text
+    const previousAvailable: HermesProduct[] = hermes
+      ? previousState.lastProducts
+        ? filterHermesAvailable(previousState.lastProducts)
+        : filterHermesAvailableText(previousState.lastContent).split('\n').filter(Boolean).map(parseHermesLine)
+      : [];
+
+    // Serialize available products to text for LLM comparison
+    const currentTrackable  = hermes ? hermesProductsToText(currentAvailable)  : currentContent;
+    const previousTrackable = hermes ? hermesProductsToText(previousAvailable) : previousState.lastContent;
+
+    if (currentTrackable === previousTrackable) {
+      this.deps.saveState({
+        url: target.url,
+        lastContent: currentContent,
+        lastChecked: new Date().toISOString(),
+        ...(hermes ? { lastProducts: currentProducts! } : {}),
+      });
       this.lastCheck = new Date().toISOString();
       this.lastResult = {
         changed: false,
-        summary: 'No meaningful change: exact text match.',
+        summary: hermes
+          ? `No change in available products (${currentAvailable.length} available).`
+          : 'No meaningful change: exact text match.',
         provider: 'none',
         fallback: false,
       };
@@ -219,15 +259,16 @@ export class MonitorController {
 
     log('info', 'llm', 'Sending to LLM providers', {
       providers: providers.map(p => `${p.id}:${p.model}`),
-      oldLength: previousState.lastContent.length,
-      newLength: currentContent.length,
+      oldLength: previousTrackable.length,
+      newLength: currentTrackable.length,
+      ...(hermes ? { note: 'comparing available products only' } : {}),
     });
     const llmStart = Date.now();
 
     const analysisResult: AnalysisResultWithMeta = await this.deps.analyzeWithProviders(
       target.url,
-      previousState.lastContent,
-      currentContent,
+      previousTrackable,
+      currentTrackable,
       providers
     );
 
@@ -251,7 +292,12 @@ export class MonitorController {
     };
 
     if (analysisResult.changed) {
-      const chunks = chunkSummaryForAlerts(analysisResult.summary);
+      // For Hermès: build structured diff message instead of raw LLM prose
+      const alertBody = hermes
+        ? formatHermesDiscordMessage(previousAvailable, currentAvailable, analysisResult.summary)
+        : analysisResult.summary;
+
+      const chunks = chunkSummaryForAlerts(alertBody);
       for (const chunk of chunks) {
         await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk);
       }
@@ -260,7 +306,13 @@ export class MonitorController {
       console.log(`[monitor] No meaningful change: ${analysisResult.summary}`);
     }
 
-    this.deps.saveState({ url: target.url, lastContent: currentContent, lastChecked: new Date().toISOString() });
+    // Save full content + structured products to state
+    this.deps.saveState({
+      url: target.url,
+      lastContent: currentContent,
+      lastChecked: new Date().toISOString(),
+      ...(hermes ? { lastProducts: currentProducts! } : {}),
+    });
   }
 
   private recordError(err: unknown): void {

@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import type { HermesProduct } from './scraper.js';
 
 const STATE_FILE = path.resolve('state.json');
 
@@ -7,6 +8,8 @@ export interface MonitorState {
   url: string;
   lastContent: string;
   lastChecked: string;
+  /** Structured product data for sites with custom extractors (e.g. Hermès). */
+  lastProducts?: HermesProduct[];
 }
 
 export function loadState(): MonitorState | null {

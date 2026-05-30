@@ -107,11 +107,13 @@ describe('sendDiscordAlert', () => {
     await sendDiscordAlert('https://webhook', 'https://site.com', 'Summary text');
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(init.body as string) as {
-      embeds: Array<{ fields: Array<{ name: string; value: string }> }>;
+      embeds: Array<{ description?: string; fields: Array<{ name: string; value: string }> }>;
     };
-    const fields = body.embeds[0]?.fields ?? [];
+    const embed = body.embeds[0];
+    const fields = embed?.fields ?? [];
+    // Summary now rendered as embed description (supports markdown)
+    expect(embed?.description).toBe('Summary text');
     expect(fields.some((f) => f.name === 'URL')).toBe(true);
-    expect(fields.some((f) => f.name === 'Summary')).toBe(true);
   });
 
   it('throws when response is not ok', async () => {
