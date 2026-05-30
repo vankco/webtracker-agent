@@ -173,6 +173,15 @@ export interface MonitorError {
   message: string;
 }
 
+export interface ContentSnapshot {
+  /** ISO-8601 timestamp of when this content was fetched. */
+  fetchedAt: string;
+  /** First 500 chars of the scraped content. */
+  preview: string;
+  /** Total character count of the full scraped content. */
+  contentLength: number;
+}
+
 export interface MonitorStatus {
   running: boolean;
   /** ISO-8601 timestamp of the last completed check. */
@@ -183,6 +192,8 @@ export interface MonitorStatus {
   targetUrl?: string;
   /** Up to 20 most-recent errors. */
   errors: MonitorError[];
+  /** Last 2 fetched content snapshots, newest first. */
+  recentSnapshots: ContentSnapshot[];
 }
 
 // ---------------------------------------------------------------------------

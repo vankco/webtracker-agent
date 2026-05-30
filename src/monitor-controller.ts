@@ -17,6 +17,7 @@ import type {
   MonitorStatus,
   LastCheckResult,
   MonitorError,
+  ContentSnapshot,
 } from './api-types.js';
 
 // ---------------------------------------------------------------------------
@@ -55,6 +56,7 @@ export class MonitorController {
   private lastResult: LastCheckResult | undefined;
   private nextCheck: string | undefined;
   private recentErrors: MonitorError[] = [];
+  private recentSnapshots: ContentSnapshot[] = [];
   private readonly deps: MonitorDependencies;
 
   constructor(deps: Partial<MonitorDependencies> = {}) {
@@ -78,6 +80,7 @@ export class MonitorController {
       nextCheck: this.nextCheck,
       targetUrl: config.target.url || undefined,
       errors: [...this.recentErrors],
+      recentSnapshots: [...this.recentSnapshots],
     };
   }
 
@@ -159,6 +162,12 @@ export class MonitorController {
     console.log(`[monitor] Checking: ${target.url}`);
 
     const currentContent = await this.deps.scrapePageText(target.url, target.selector, browser);
+
+    // Record snapshot (newest first, keep last 2)
+    this.recentSnapshots = [
+      { fetchedAt: new Date().toISOString(), preview: currentContent.slice(0, 500), contentLength: currentContent.length },
+      ...this.recentSnapshots,
+    ].slice(0, 2);
 
     if (!currentContent.trim()) {
       const msg = target.selector

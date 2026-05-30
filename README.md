@@ -114,8 +114,9 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 ### Monitor page
 
 - **Start / Stop** — starts or stops the monitoring loop
-- **Last Check / Next Check** — when the last check ran and when the next is scheduled
-- **Last Result** — the LLM's analysis from the most recent check
+- **Last Check / Next Check** — when the last check ran and when the next is scheduled (Next Check only shown while running)
+- **Last Result** — the LLM's analysis from the most recent check, including provider, model, and latency
+- **Recent Fetched Content** — last 2 scraped snapshots with timestamp, character count, and first 500 chars preview
 - **Recent Errors** — scrape failures, empty content warnings, etc.
 - **Schedule Controls** — change the check interval or enable run-once mode without restarting
 - **Scrape Validator** — test a URL + CSS selector before starting the monitor; shows a content preview and character count
@@ -124,8 +125,8 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 
 - **Enable / Disable** each LLM provider with the toggle
 - **Edit** — change the model, API key, priority, timeout, and retries
-- **Test connection** — sends a real request to the provider and shows the response
-- **Available models** — expandable list of all models for that provider with free/paid badges
+- **Test connection** — sends a real LLM request with sample content and shows the full model response (`changed` + `summary`)
+- **Available models** — expandable list fetched live from the provider API on startup, with free/paid tier badges
 - **Priority** — lower number = tried first. If priority 1 fails, priority 2 is tried automatically
 
 ### Config page
@@ -160,10 +161,22 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 Providers are tried in priority order (lowest number first):
 
 1. Gemini is called
-2. If Gemini fails → Groq is tried
+2. If Gemini fails (bad key, timeout, quota) → Groq is tried
 3. If all providers fail → local text-diff fallback is used (no LLM call)
 
 The fallback always produces a result — the monitor never crashes due to LLM failure.
+
+## Content sent to the LLM
+
+Each check sends up to **3000 chars of old content** and **3000 chars of new content** to the LLM. If your page is longer than 3000 chars, only the first 3000 are analyzed — changes lower on the page may be missed. Use a CSS selector to target a specific section and reduce noise.
+
+## Empty scrape detection
+
+If the scraper fetches a page but gets no content back (selector matched nothing, or the element was empty), the monitor:
+- Logs a warning to the console
+- Records it in the Recent Errors card
+- Sends a Discord alert explaining whether it was likely a bad selector or a bot block
+- Skips the LLM call for that cycle
 
 ---
 

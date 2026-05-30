@@ -135,6 +135,12 @@ export interface MonitorError {
   message: string;
 }
 
+export interface ContentSnapshot {
+  fetchedAt: string;
+  preview: string;
+  contentLength: number;
+}
+
 export interface MonitorStatus {
   running: boolean;
   lastCheck?: string;
@@ -142,6 +148,7 @@ export interface MonitorStatus {
   nextCheck?: string;
   targetUrl?: string;
   errors: MonitorError[];
+  recentSnapshots: ContentSnapshot[];
 }
 
 export interface StartMonitorRequest {

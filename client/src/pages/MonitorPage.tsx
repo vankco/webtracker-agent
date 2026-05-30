@@ -31,7 +31,7 @@ import {
   TimerRegular,
 } from '@fluentui/react-icons';
 import { api, ApiError } from '../api/client.js';
-import type { MonitorStatus, ValidateScrapeResponse } from '../api/types.js';
+import type { MonitorStatus, ValidateScrapeResponse, ContentSnapshot } from '../api/types.js';
 
 const useStyles = makeStyles({
   root: {
@@ -455,6 +455,28 @@ export function MonitorPage() {
         <Card>
           <div className={styles.emptyState}>
             <Text>No checks have run yet. Start the monitor to begin tracking.</Text>
+          </div>
+        </Card>
+      )}
+
+      {/* Recent content snapshots */}
+      {status && status.recentSnapshots.length > 0 && (
+        <Card>
+          <CardHeader header={<Title3>Recent Fetched Content</Title3>} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
+            {status.recentSnapshots.map((snap: ContentSnapshot, i: number) => (
+              <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: tokens.spacingHorizontalS }}>
+                  <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>
+                    {i === 0 ? 'Latest' : 'Previous'} — {new Date(snap.fetchedAt).toLocaleTimeString()}
+                  </Caption1>
+                  <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>
+                    {snap.contentLength.toLocaleString()} chars
+                  </Caption1>
+                </div>
+                <div className={styles.summaryText}>{snap.preview}{snap.contentLength > 500 ? '…' : ''}</div>
+              </div>
+            ))}
           </div>
         </Card>
       )}
