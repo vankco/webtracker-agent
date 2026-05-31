@@ -365,3 +365,50 @@ describe('E2E: scrape errors appear in status.errors', () => {
     expect(messages.some((m) => m.includes('Navigation timeout'))).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 10. Hermès deterministic diff path
+// ---------------------------------------------------------------------------
+describe('E2E: Hermès deterministic change detection', () => {
+  const HERMES_URL = 'https://www.hermes.com/us/en/category/bags/';
+
+  function makeHermesConfig() {
+    return loadAppConfigLenient({
+      TARGET_URL: HERMES_URL,
+      DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/hermes-test',
+      GEMINI_API_KEY: 'gemini-key',
+      LLM_GEMINI_ENABLED: 'true',
+    });
+  }
+
+  const oldProduct = 'Bag A | Black | Price $5,000 | SKU:H001 | Available | /us/en/product/bag-a/';
+  const newProduct = 'Bag B | White | Price $6,000 | SKU:H002 | Available | /us/en/product/bag-b/';
+
+  it('sends deterministic alert and does not call LLM when Hermès products change', async () => {
+    const config = makeHermesConfig();
+    const configStore = new ConfigStore(config);
+    const { deps, stateStore, alertsSent, scrapeContent } = makeDeps();
+    const controller = new MonitorController(deps);
+    const app = createApiApp(configStore, controller, () => {});
+
+    stateStore.state = {
+      url: HERMES_URL,
+      lastContent: oldProduct,
+      lastChecked: new Date().toISOString(),
+      lastProducts: [{ name: 'Bag A', color: 'Black', price: 'Price $5,000', sku: 'H001', available: true, url: '/us/en/product/bag-a/' }],
+    } as Parameters<MonitorDependencies['saveState']>[0];
+
+    scrapeContent.value = newProduct;
+
+    await request(app).post('/api/monitor/start').send({});
+    await new Promise((r) => setTimeout(r, 30));
+    await controller.stop();
+
+    expect(deps.analyzeWithProviders).not.toHaveBeenCalled();
+    expect(alertsSent.length).toBeGreaterThan(0);
+
+    const statusRes = await request(app).get('/api/monitor/status');
+    expect(statusRes.body.data.lastResult.changed).toBe(true);
+    expect(statusRes.body.data.lastResult.provider).toBe('deterministic');
+  });
+});
