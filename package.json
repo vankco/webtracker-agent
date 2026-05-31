@@ -16,7 +16,8 @@
     "client:dev": "cd client && npm run dev",
     "client:build": "cd client && npm run build",
     "client:typecheck": "cd client && npm run typecheck",
-    "dev:all": "concurrently -n api,ui -c cyan,magenta \"npm run api:dev\" \"npm run client:dev\""
+    "dev:all": "concurrently -n api,ui -c cyan,magenta \"npm run api:dev\" \"npm run client:dev\"",
+    "prepare": "husky"
   },
   "dependencies": {
     "@google/genai": "^2.6.0",
@@ -36,6 +37,7 @@
     "@types/supertest": "^7.2.0",
     "@vitest/coverage-v8": "^4.1.7",
     "concurrently": "^9.2.1",
+    "husky": "^9.1.7",
     "supertest": "^7.2.2",
     "tsx": "^4.15.0",
     "typescript": "^5.4.5",
