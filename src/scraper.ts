@@ -156,47 +156,56 @@ function productLine(p: HermesProduct): string {
   return `• ${link} — ${p.color} — ${p.price} — \`${p.sku}\``;
 }
 
-/**
- * Builds a structured Discord markdown message by diffing two available-product arrays.
- */
-export function formatHermesDiscordMessage(
+export interface HermesDiff {
+  added: HermesProduct[];
+  removed: HermesProduct[];
+  changed: Array<{ old: HermesProduct; new: HermesProduct }>;
+}
+
+export function diffHermesProducts(
   oldProducts: HermesProduct[],
   newProducts: HermesProduct[],
-  llmSummary: string
-): string {
-
+): HermesDiff {
   const oldMap = new Map(oldProducts.map(p => [p.sku, p]));
   const newMap = new Map(newProducts.map(p => [p.sku, p]));
 
-  const added   = newProducts.filter(p => !oldMap.has(p.sku));
-  const removed = oldProducts.filter(p => !newMap.has(p.sku));
-  const changed = newProducts
-    .filter(p => oldMap.has(p.sku))
-    .map(p => ({ old: oldMap.get(p.sku)!, new: p }))
-    .filter(({ old: o, new: n }) => o.price !== n.price || o.color !== n.color || o.name !== n.name);
+  return {
+    added:   newProducts.filter(p => !oldMap.has(p.sku)),
+    removed: oldProducts.filter(p => !newMap.has(p.sku)),
+    changed: newProducts
+      .filter(p => oldMap.has(p.sku))
+      .map(p => ({ old: oldMap.get(p.sku)!, new: p }))
+      .filter(({ old: o, new: n }) => o.price !== n.price || o.color !== n.color || o.name !== n.name),
+  };
+}
 
+export function summarizeHermesDiff(diff: HermesDiff): string {
+  const parts: string[] = [];
+  if (diff.added.length > 0)   parts.push(`${diff.added.length} newly available`);
+  if (diff.removed.length > 0) parts.push(`${diff.removed.length} no longer available`);
+  if (diff.changed.length > 0) parts.push(`${diff.changed.length} updated`);
+  return parts.join(', ') || 'No changes';
+}
+
+export function formatHermesDiscordMessage(diff: HermesDiff, totalCount: number): string {
   const sections: string[] = [];
 
-  if (added.length > 0) {
-    sections.push(`➕ **Newly Available (${added.length})**\n${added.map(productLine).join('\n')}`);
+  if (diff.added.length > 0) {
+    sections.push(`➕ **Newly Available (${diff.added.length})**\n${diff.added.map(productLine).join('\n')}`);
   }
-  if (removed.length > 0) {
-    sections.push(`➖ **No Longer Available (${removed.length})**\n${removed.map(productLine).join('\n')}`);
+  if (diff.removed.length > 0) {
+    sections.push(`➖ **No Longer Available (${diff.removed.length})**\n${diff.removed.map(productLine).join('\n')}`);
   }
-  if (changed.length > 0) {
-    const changedLines = changed.map(({ old: o, new: n }) => {
+  if (diff.changed.length > 0) {
+    const changedLines = diff.changed.map(({ old: o, new: n }) => {
       const link = n.url ? `[${n.name}](${HERMES_BASE}${n.url})` : `**${n.name}**`;
       const priceDiff = o.price !== n.price ? ` ~~${o.price}~~ → **${n.price}**` : ` ${n.price}`;
       return `• ${link} — ${n.color}${priceDiff} — \`${n.sku}\``;
     });
-    sections.push(`💰 **Updated (${changed.length})**\n${changedLines.join('\n')}`);
+    sections.push(`💰 **Updated (${diff.changed.length})**\n${changedLines.join('\n')}`);
   }
 
-  const stats = `📊 ${newProducts.length} available total`;
-  const body = sections.join('\n\n');
-  const summary = llmSummary ? `\n\n💬 *${llmSummary.slice(0, 300)}*` : '';
-
-  return `${body}${summary}\n\n${stats}`;
+  return `${sections.join('\n\n')}\n\n📊 ${totalCount} available total`;
 }
 
 export function formatHermesBaselineMessage(available: HermesProduct[]): string {
