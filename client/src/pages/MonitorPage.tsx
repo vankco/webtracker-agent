@@ -132,6 +132,18 @@ const useStyles = makeStyles({
       alignItems: 'stretch',
     },
   },
+  controlsFieldFixed180: {
+    flex: '0 0 180px',
+    '@media (max-width: 600px)': {
+      flex: '1 1 auto',
+    },
+  },
+  controlsFieldFixed200: {
+    flex: '0 0 200px',
+    '@media (max-width: 600px)': {
+      flex: '1 1 auto',
+    },
+  },
   scrapeSnippet: {
     backgroundColor: tokens.colorNeutralBackground3,
     borderRadius: tokens.borderRadiusMedium,
@@ -491,7 +503,7 @@ export function MonitorPage() {
         />
         <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS }}>
           <div className={styles.controlsRow}>
-            <Field label="Check interval (seconds)" style={{ flex: '0 0 180px' }}>
+            <Field label="Check interval (seconds)" className={styles.controlsFieldFixed180}>
               <Input
                 type="number"
                 value={scheduleInterval}
@@ -549,7 +561,7 @@ export function MonitorPage() {
                 style={{ fontFamily: 'monospace' }}
               />
             </Field>
-            <Field label="CSS Selector (optional)" style={{ flex: '0 0 200px' }}>
+            <Field label="CSS Selector (optional)" className={styles.controlsFieldFixed200}>
               <Input
                 value={scrapeSelector}
                 onChange={(e) => setScrapeSelector(e.target.value)}
