@@ -63,6 +63,10 @@ export function isHermesUrl(url: string): boolean {
 }
 
 export async function extractHermesProducts(page: Page): Promise<HermesProduct[]> {
+  // Wait for at least one product to appear, then allow lazy-loaded items to settle
+  await page.waitForSelector('div.product-item', { timeout: 10_000 }).catch(() => {});
+  await page.waitForTimeout(2000);
+
   return page.evaluate(() => {
     return Array.from(document.querySelectorAll('div.product-item')).map((item) => {
       const linkEl = item.querySelector('a.product-item-name');
