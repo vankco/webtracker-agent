@@ -4,7 +4,7 @@
   "description": "AI-powered website change monitor using Playwright + Gemini + Discord",
   "workspaces": ["plugins/*"],
   "scripts": {
-    "start": "tsx src/agent.ts",
+    "start": "API_PORT=3001 concurrently -n api,ui -c cyan,magenta \"tsx --watch src/agent.ts\" \"npm run client:dev\"",
     "dev": "tsx --watch src/agent.ts",
     "api": "set API_PORT=3001&& tsx src/agent.ts",
     "api:dev": "set API_PORT=3001&& tsx --watch src/agent.ts",
