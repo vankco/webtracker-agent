@@ -47,6 +47,7 @@ function makeConfig(providers: LlmProviderConfig[]): AppConfig {
       userDataDir: '.browser-profile',
     },
     notifications: { discordWebhookUrl: 'https://discord.com/api/webhooks/test' },
+    plugins: [],
     llmProviders: providers,
   };
 }

@@ -18,6 +18,8 @@ import { ConfigStore, loadAppConfigLenient } from '../config.js';
 import { MonitorController } from '../monitor-controller.js';
 import type { MonitorDependencies } from '../monitor-controller.js';
 import type { AnalysisResult } from '../analyzer.js';
+import { PluginRegistry } from '../plugin-registry.js';
+import hermesPlugin from '@webtracker/plugin-hermes';
 
 // ---------------------------------------------------------------------------
 // Mock factories
@@ -388,7 +390,9 @@ describe('E2E: Hermès deterministic change detection', () => {
     const config = makeHermesConfig();
     const configStore = new ConfigStore(config);
     const { deps, stateStore, alertsSent, scrapeContent } = makeDeps();
-    const controller = new MonitorController(deps);
+    const registry = new PluginRegistry();
+    registry.register(hermesPlugin);
+    const controller = new MonitorController(deps, registry);
     const app = createApiApp(configStore, controller, () => {});
 
     stateStore.state = {

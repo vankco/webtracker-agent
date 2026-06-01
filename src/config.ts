@@ -45,6 +45,7 @@ export interface AppConfig {
   browser: BrowserConfig;
   notifications: NotificationsConfig;
   llmProviders: LlmProviderConfig[];
+  plugins: string[];
 }
 
 /** API-safe provider config — never exposes raw API keys. */
@@ -229,6 +230,7 @@ export interface JsonConfig {
   runOnce?: boolean;
   discordWebhookUrl?: string;
   apiPort?: number;
+  plugins?: string[];
 
   llm?: {
     gemini?: {
@@ -293,6 +295,7 @@ function jsonToEnv(json: JsonConfig, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv
   if (json.runOnce !== undefined)           env['RUN_ONCE']                = String(json.runOnce);
   if (json.discordWebhookUrl !== undefined) env['DISCORD_WEBHOOK_URL']     = json.discordWebhookUrl;
   if (json.apiPort !== undefined)           env['API_PORT']                = String(json.apiPort);
+  if (json.plugins !== undefined)           env['PLUGINS']                 = json.plugins.join(',');
 
   const g = json.llm?.gemini;
   if (g) {
@@ -374,6 +377,7 @@ export function saveJsonConfig(config: AppConfig, filePath = resolveConfigPath()
       manualAssisted:              config.browser.manualAssisted,
       manualAssistedInitialWaitMs: config.browser.manualAssistedInitialWaitMs,
     },
+    plugins: config.plugins.length > 0 ? config.plugins : undefined,
   };
 
   fs.writeFileSync(filePath, JSON.stringify(json, null, 2), 'utf-8');
@@ -427,6 +431,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = resolveEnv()): AppConfig 
       discordWebhookUrl: requireEnv('DISCORD_WEBHOOK_URL', env),
     },
     llmProviders: parseProviderConfig(env),
+    plugins: env['PLUGINS'] ? env['PLUGINS'].split(',').map(s => s.trim()).filter(Boolean) : [],
   };
 
   const errors = validateAppConfig(config);
@@ -473,6 +478,7 @@ export function loadAppConfigLenient(env: NodeJS.ProcessEnv = resolveEnv()): App
       discordWebhookUrl: env['DISCORD_WEBHOOK_URL'] ?? '',
     },
     llmProviders: parseProviderConfig(env),
+    plugins: env['PLUGINS'] ? env['PLUGINS'].split(',').map(s => s.trim()).filter(Boolean) : [],
   };
 }
 

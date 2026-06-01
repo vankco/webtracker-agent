@@ -9,6 +9,7 @@ import {
 } from './config.js';
 import { MonitorController } from './monitor-controller.js';
 import { startApiServer } from './api.js';
+import { loadPlugins } from './plugin-registry.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -38,7 +39,8 @@ async function main(): Promise<void> {
     // -------------------------------------------------------------------
     const initial = loadAppConfigLenient(resolveEnv());
     const configStore = new ConfigStore(initial);
-    const monitorController = new MonitorController();
+    const registry = await loadPlugins(initial.plugins);
+    const monitorController = new MonitorController({}, registry);
 
     const enabledProviders = getEnabledProvidersByPriority(initial);
     if (enabledProviders.length > 0) {
@@ -66,7 +68,8 @@ async function main(): Promise<void> {
     console.log(`[agent] LLM providers by priority: ${enabledProviders}`);
 
     const configStore = new ConfigStore(config);
-    const monitorController = new MonitorController();
+    const registry = await loadPlugins(config.plugins);
+    const monitorController = new MonitorController({}, registry);
 
     registerSignalHandlers(monitorController);
     await monitorController.start(configStore);

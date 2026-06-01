@@ -4,20 +4,9 @@
  * Designed to be injectable so the API server and CLI share the same instance.
  */
 
-import {
-  scrapePageText,
-  closeScraperSession,
-  isHermesUrl,
-  filterHermesAvailable,
-  filterHermesAvailableText,
-  hermesProductsToText,
-  parseHermesLine,
-  diffHermesProducts,
-  summarizeHermesDiff,
-  formatHermesDiscordMessage,
-  formatHermesBaselineMessage,
-  type HermesProduct,
-} from './scraper.js';
+import { scrapePageText, closeScraperSession } from './scraper.js';
+import type { SitePlugin } from './plugin-types.js';
+import { PluginRegistry } from './plugin-registry.js';
 import { sendDiscordAlert } from './notifier.js';
 import { loadState, saveState } from './state.js';
 import { analyzeWithProviders, type AnalysisResultWithMeta } from './llm.js';
@@ -72,9 +61,11 @@ export class MonitorController {
   private recentErrors: MonitorError[] = [];
   private recentSnapshots: ContentSnapshot[] = [];
   private readonly deps: MonitorDependencies;
+  private readonly registry: PluginRegistry;
 
-  constructor(deps: Partial<MonitorDependencies> = {}) {
+  constructor(deps: Partial<MonitorDependencies> = {}, registry: PluginRegistry = new PluginRegistry()) {
     this.deps = { ...DEFAULT_DEPS, ...deps };
+    this.registry = registry;
   }
 
   // -------------------------------------------------------------------------
@@ -174,27 +165,26 @@ export class MonitorController {
   private async runCheck(config: AppConfig): Promise<void> {
     const { target, browser } = config;
     const providers = getEnabledProvidersByPriority(config);
+    const plugin: SitePlugin | null = this.registry.findForUrl(target.url);
 
-    log('info', 'scrape', `Fetching ${target.url}`, { selector: target.selector || '(none)' });
+    log('info', 'scrape', `Fetching ${target.url}`, { selector: target.selector || '(none)', plugin: plugin?.name ?? 'none' });
     const scrapeStart = Date.now();
 
-    const currentContent = await this.deps.scrapePageText(target.url, target.selector, browser);
+    const currentContent = await this.deps.scrapePageText(target.url, target.selector, browser, plugin ?? undefined);
 
-    const hermes = isHermesUrl(target.url);
-
-    // For Hermès: parse structured products and derive available subset
-    const currentProducts: HermesProduct[] | null = hermes
-      ? currentContent.split('\n').filter(Boolean).map(parseHermesLine)
+    // For plugin URLs: parse structured products and derive available subset
+    const currentProducts: unknown[] | null = plugin
+      ? currentContent.split('\n').filter(Boolean).map(line => plugin.parseProductLine(line))
       : null;
-    const currentAvailable: HermesProduct[] = hermes
-      ? filterHermesAvailable(currentProducts!)
+    const currentAvailable: unknown[] = plugin
+      ? plugin.filterAvailable(currentProducts!)
       : [];
 
     log('info', 'scrape', `Fetch complete`, {
       url: target.url,
       contentLength: currentContent.length,
       latencyMs: Date.now() - scrapeStart,
-      ...(hermes ? { totalProducts: currentProducts!.length, availableProducts: currentAvailable.length } : {}),
+      ...(plugin ? { totalProducts: currentProducts!.length, availableProducts: currentAvailable.length } : {}),
     });
 
     // Record snapshot (newest first, keep last 2)
@@ -219,8 +209,8 @@ export class MonitorController {
     const previousState = this.deps.loadState();
 
     if (!previousState) {
-      if (hermes && config.notifications.discordWebhookUrl) {
-        const alertBody = formatHermesBaselineMessage(currentAvailable);
+      if (plugin && config.notifications.discordWebhookUrl) {
+        const alertBody = plugin.formatBaselineMessage(currentAvailable);
         const chunks = chunkSummaryForAlerts(alertBody);
         for (const chunk of chunks) {
           await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk);
@@ -233,34 +223,34 @@ export class MonitorController {
         url: target.url,
         lastContent: currentContent,
         lastChecked: new Date().toISOString(),
-        ...(hermes ? { lastProducts: currentProducts! } : {}),
+        ...(plugin ? { lastProducts: currentProducts! } : {}),
       });
       this.lastCheck = new Date().toISOString();
       return;
     }
 
-    // Resolve previous available products — use stored array if present, else parse from text
-    const previousAvailable: HermesProduct[] = hermes
+    // Resolve previous available products from stored array or parse from text (legacy fallback)
+    const previousAvailable: unknown[] = plugin
       ? previousState.lastProducts
-        ? filterHermesAvailable(previousState.lastProducts)
-        : filterHermesAvailableText(previousState.lastContent).split('\n').filter(Boolean).map(parseHermesLine)
+        ? plugin.filterAvailable(previousState.lastProducts)
+        : previousState.lastContent.split('\n').filter(Boolean).map(line => plugin.parseProductLine(line)).filter((p: unknown) => plugin.filterAvailable([p]).length > 0)
       : [];
 
-    // Serialize available products to text for LLM comparison
-    const currentTrackable  = hermes ? hermesProductsToText(currentAvailable)  : currentContent;
-    const previousTrackable = hermes ? hermesProductsToText(previousAvailable) : previousState.lastContent;
+    // Serialize available products to text for comparison
+    const currentTrackable  = plugin ? plugin.productsToText(currentAvailable)  : currentContent;
+    const previousTrackable = plugin ? plugin.productsToText(previousAvailable) : previousState.lastContent;
 
     if (currentTrackable === previousTrackable) {
       this.deps.saveState({
         url: target.url,
         lastContent: currentContent,
         lastChecked: new Date().toISOString(),
-        ...(hermes ? { lastProducts: currentProducts! } : {}),
+        ...(plugin ? { lastProducts: currentProducts! } : {}),
       });
       this.lastCheck = new Date().toISOString();
       this.lastResult = {
         changed: false,
-        summary: hermes
+        summary: plugin
           ? `No change in available products (${currentAvailable.length} available).`
           : 'No meaningful change: exact text match.',
         provider: 'none',
@@ -270,33 +260,34 @@ export class MonitorController {
     }
 
     // -----------------------------------------------------------------------
-    // Hermès: deterministic structured diff — no LLM needed
+    // Plugin: deterministic diff (+ optional LLM fallback)
     // -----------------------------------------------------------------------
-    if (hermes) {
-      const diff = diffHermesProducts(previousAvailable, currentAvailable);
-      const summary = summarizeHermesDiff(diff);
+    if (plugin) {
+      const pluginDiff = plugin.diff(previousAvailable, currentAvailable);
 
-      log('info', 'monitor', 'Change detected (deterministic)', {
-        added: diff.added.length,
-        removed: diff.removed.length,
-        changed: diff.changed.length,
-      });
+      log('info', 'monitor', 'Change detected (plugin)', { plugin: plugin.name, summary: pluginDiff.summary });
+
+      let finalSummary = pluginDiff.summary;
+
+      if (pluginDiff.requestLlmFallback && providers.length > 0) {
+        const llmResult = await this.deps.analyzeWithProviders(target.url, previousTrackable, currentTrackable, providers);
+        if (llmResult.summary) finalSummary += `\n\n${llmResult.summary}`;
+      }
 
       this.lastCheck = new Date().toISOString();
       this.lastResult = {
-        changed: true,
-        summary,
+        changed: pluginDiff.hasChanges,
+        summary: finalSummary,
         provider: 'deterministic',
         fallback: false,
       };
 
-      if (config.notifications.discordWebhookUrl) {
-        const alertBody = formatHermesDiscordMessage(diff, currentAvailable.length);
-        const chunks = chunkSummaryForAlerts(alertBody);
+      if (pluginDiff.hasChanges && config.notifications.discordWebhookUrl) {
+        const chunks = chunkSummaryForAlerts(pluginDiff.alertBody);
         for (const chunk of chunks) {
           await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk);
         }
-        log('info', 'monitor', `${chunks.length} alert(s) sent`, { summary });
+        log('info', 'monitor', `${chunks.length} alert(s) sent`, { summary: finalSummary });
       }
 
       this.deps.saveState({
@@ -308,11 +299,13 @@ export class MonitorController {
       return;
     }
 
+    // -----------------------------------------------------------------------
+    // General: LLM-based change detection
+    // -----------------------------------------------------------------------
     log('info', 'llm', 'Sending to LLM providers', {
       providers: providers.map(p => `${p.id}:${p.model}`),
       oldLength: previousTrackable.length,
       newLength: currentTrackable.length,
-      ...(hermes ? { note: 'comparing available products only' } : {}),
     });
     const llmStart = Date.now();
 
@@ -352,7 +345,6 @@ export class MonitorController {
       console.log(`[monitor] No meaningful change: ${analysisResult.summary}`);
     }
 
-    // Save full content to state
     this.deps.saveState({
       url: target.url,
       lastContent: currentContent,
