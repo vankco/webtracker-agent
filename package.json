@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "start": "API_PORT=3001 concurrently -n api,ui -c cyan,magenta \"tsx --watch src/agent.ts\" \"npm run client:dev\"",
-    "stop": "lsof -ti:3001,5173 | xargs kill -9 2>/dev/null || true",
+    "stop": "lsof -ti:3001,5173 | xargs kill -9 2>/dev/null || true && rm -f .browser-profile/SingletonLock .browser-profile/SingletonCookie .browser-profile/SingletonSocket",
     "dev": "tsx --watch src/agent.ts",
     "api": "set API_PORT=3001&& tsx src/agent.ts",
     "api:dev": "set API_PORT=3001&& tsx --watch src/agent.ts",
