@@ -115,6 +115,8 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 ### Debug Log page
 
 - **Live event log** — every scrape, LLM call, alert, and error is recorded with a timestamp and log level
+- **Persistent across restarts** — logs are written to `logs.jsonl` and reloaded on startup; up to 2 weeks of history is retained
+- **Real-time Discord alerts** — any `warn` or `error` entry immediately sends a Discord notification
 - **Filter by level** — filter to `info`, `warn`, or `error` events
 - **Auto-scroll** — newest events appear at the bottom; scrolls automatically unless you scroll up
 

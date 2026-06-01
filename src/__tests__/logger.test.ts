@@ -46,7 +46,7 @@ describe('logger', () => {
 describe('setAlertCallback', () => {
   beforeEach(() => {
     clearLogs();
-    setAlertCallback(null as any);
+    setAlertCallback(null);
   });
 
   it('calls the callback on warn entries', () => {
