@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const c=[];process.stdin.on('data',d=>c.push(d));process.stdin.on('end',()=>{const i=JSON.parse(c.join(''));const fp=(i.tool_input&&i.tool_input.file_path)||'';if(/src\\/.*\\.tsx?$|client\\/src\\/.*\\.tsx?$/.test(fp)){process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'PostToolUse',additionalContext:'You just modified '+fp+'. If this change adds, removes, or modifies a user-facing feature, update README.md to reflect it.'}}));}});\""
+          }
+        ]
+      }
+    ]
+  }
+}

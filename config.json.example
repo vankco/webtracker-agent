@@ -1,0 +1,34 @@
+{
+  "targetUrl": "https://example.com",
+  "targetSelector": "",
+  "checkIntervalMs": 300000,
+  "runOnce": false,
+  "discordWebhookUrl": "https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN",
+  "apiPort": 3001,
+
+  "llm": {
+    "gemini": {
+      "enabled": true,
+      "apiKey": "YOUR_GEMINI_API_KEY",
+      "model": "gemini-2.5-flash",
+      "priority": 1,
+      "timeoutMs": 30000,
+      "maxRetries": 1
+    },
+    "groq": {
+      "enabled": false,
+      "apiKey": "",
+      "model": "llama-3.3-70b-versatile",
+      "priority": 2,
+      "timeoutMs": 30000,
+      "maxRetries": 1
+    }
+  },
+
+  "browser": {
+    "headless": true,
+    "persistSession": true,
+    "userDataDir": ".browser-profile",
+    "gotoTimeoutMs": 60000
+  }
+}

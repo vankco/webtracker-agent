@@ -109,7 +109,7 @@ function getChangedSnippetPairs(
   return pairs;
 }
 
-function localFallbackAnalysis(oldContent: string, newContent: string): AnalysisResult {
+export function localFallbackAnalysis(oldContent: string, newContent: string): AnalysisResult {
   if (oldContent === newContent) {
     return {
       changed: false,
@@ -152,23 +152,21 @@ function localFallbackAnalysis(oldContent: string, newContent: string): Analysis
   };
 }
 
-function isQuotaOrRateLimitError(err: unknown): boolean {
-  if (!err || typeof err !== 'object') return false;
+// ---------------------------------------------------------------------------
+// Shared prompt — used by all LLM providers (Gemini, Groq, …)
+// ---------------------------------------------------------------------------
 
-  const withStatus = err as { status?: number; message?: string };
-  const message = (withStatus.message ?? '').toLowerCase();
-  return withStatus.status === 429 || message.includes('quota') || message.includes('rate limit');
-}
+export const MONITOR_SYSTEM_PROMPT =
+  `You are a website change monitoring assistant. ` +
+  `Analyze differences between two versions of webpage content and identify meaningful changes. ` +
+  `Always respond with valid JSON only — no markdown fences, no extra text.`;
 
-export async function analyzeChanges(
+export function buildMonitorUserPrompt(
   url: string,
   oldContent: string,
-  newContent: string,
-  apiKey: string
-): Promise<AnalysisResult> {
-  const genAI = new GoogleGenAI({ apiKey });
-
-  const prompt = `You are monitoring a website for meaningful changes.
+  newContent: string
+): string {
+  return `Compare these two versions of a webpage and identify meaningful changes.
 
 URL: ${url}
 
@@ -178,17 +176,28 @@ ${oldContent.slice(0, 3000)}
 --- CURRENT CONTENT (truncated to 3000 chars) ---
 ${newContent.slice(0, 3000)}
 
-Instructions:
-- Ignore trivial differences like whitespace, punctuation, or minor wording tweaks.
-- Focus on meaningful changes: new sections, price changes, availability updates, new announcements, removed content, etc.
-- Reply with ONLY valid JSON in this exact format (no markdown, no extra text):
-{"changed": true, "summary": "Short description of what changed"}
-or
-{"changed": false, "summary": "No meaningful changes detected"}`;
+Rules:
+- Ignore trivial differences (whitespace, punctuation, minor wording).
+- Focus on meaningful changes: new sections, price/availability changes, announcements, removed content.
+- Respond with JSON in exactly one of these two formats:
+  {"changed": true, "summary": "Short description of what changed"}
+  {"changed": false, "summary": "No meaningful changes detected"}`;
+}
+
+export async function analyzeChanges(
+  url: string,
+  oldContent: string,
+  newContent: string,
+  apiKey: string,
+  model = 'gemini-2.5-flash'
+): Promise<AnalysisResult> {
+  const genAI = new GoogleGenAI({ apiKey });
+
+  const prompt = `${MONITOR_SYSTEM_PROMPT}\n\n${buildMonitorUserPrompt(url, oldContent, newContent)}`;
 
   try {
     const result = await genAI.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model,
       contents: prompt,
     });
     const raw = (result.text ?? '').trim();
@@ -201,10 +210,8 @@ or
     const json = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
     return JSON.parse(json) as AnalysisResult;
   } catch (err) {
-    if (isQuotaOrRateLimitError(err)) {
-      console.warn('Gemini quota/rate-limit hit. Falling back to local text-diff analysis.');
-      return localFallbackAnalysis(oldContent, newContent);
-    }
+    // Re-throw so analyzeWithProviders can try the next provider (e.g. Groq)
+    // instead of silently falling back to local diff here.
     throw err;
   }
 }

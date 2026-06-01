@@ -1,0 +1,544 @@
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+export type LlmProviderId = 'gemini' | 'groq';
+
+export interface LlmProviderConfig {
+  id: LlmProviderId;
+  enabled: boolean;
+  priority: number;
+  model: string;
+  apiKey?: string;
+  timeoutMs: number;
+  maxRetries: number;
+}
+
+export interface TargetConfig {
+  url: string;
+  selector: string;
+}
+
+export interface ScheduleConfig {
+  intervalMs: number;
+  runOnce: boolean;
+}
+
+export interface BrowserConfig {
+  manualAssisted: boolean;
+  manualAssistedInitialWaitMs: number;
+  persistSession: boolean;
+  headless: boolean;
+  slowMoMs: number;
+  keepOpenMs: number;
+  gotoTimeoutMs: number;
+  userDataDir: string;
+}
+
+export interface NotificationsConfig {
+  discordWebhookUrl: string;
+}
+
+export interface AppConfig {
+  target: TargetConfig;
+  schedule: ScheduleConfig;
+  browser: BrowserConfig;
+  notifications: NotificationsConfig;
+  llmProviders: LlmProviderConfig[];
+  plugins: string[];
+}
+
+/** API-safe provider config — never exposes raw API keys. */
+export interface SafeLlmProviderConfig {
+  id: LlmProviderId;
+  enabled: boolean;
+  priority: number;
+  model: string;
+  apiKeyConfigured: boolean;
+  timeoutMs: number;
+  maxRetries: number;
+}
+
+/** API-safe app config — never exposes raw API keys. */
+export interface SafeAppConfig extends Omit<AppConfig, 'llmProviders'> {
+  llmProviders: SafeLlmProviderConfig[];
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+function parseBooleanEnv(value: string | undefined, defaultValue: boolean): boolean {
+  if (value == null) return defaultValue;
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return defaultValue;
+}
+
+function parseIntEnv(value: string | undefined, defaultValue: number): number {
+  if (value == null || value.trim() === '') return defaultValue;
+  const parsed = parseInt(value, 10);
+  return Number.isNaN(parsed) ? defaultValue : parsed;
+}
+
+function requireEnv(key: string, env: NodeJS.ProcessEnv): string {
+  const value = env[key];
+  if (!value) {
+    throw new Error(`Missing required env variable: ${key}`);
+  }
+  return value;
+}
+
+function parseProviderConfig(env: NodeJS.ProcessEnv): LlmProviderConfig[] {
+  const geminiApiKey = env['GEMINI_API_KEY'];
+  const geminiEnabledByDefault = Boolean(geminiApiKey);
+  const gemini: LlmProviderConfig = {
+    id: 'gemini',
+    enabled: parseBooleanEnv(env['LLM_GEMINI_ENABLED'], geminiEnabledByDefault),
+    priority: Math.max(1, parseIntEnv(env['LLM_GEMINI_PRIORITY'], 1)),
+    model: (env['LLM_GEMINI_MODEL'] || 'gemini-2.5-flash').trim(),
+    apiKey: geminiApiKey,
+    timeoutMs: Math.max(1_000, parseIntEnv(env['LLM_GEMINI_TIMEOUT_MS'], 30_000)),
+    maxRetries: Math.max(0, parseIntEnv(env['LLM_GEMINI_MAX_RETRIES'], 1)),
+  };
+
+  const groqApiKey = env['GROQ_API_KEY'];
+  const groq: LlmProviderConfig = {
+    id: 'groq',
+    enabled: parseBooleanEnv(env['LLM_GROQ_ENABLED'], false),
+    priority: Math.max(1, parseIntEnv(env['LLM_GROQ_PRIORITY'], 2)),
+    model: (env['LLM_GROQ_MODEL'] || 'llama-3.3-70b-versatile').trim(),
+    apiKey: groqApiKey,
+    timeoutMs: Math.max(1_000, parseIntEnv(env['LLM_GROQ_TIMEOUT_MS'], 30_000)),
+    maxRetries: Math.max(0, parseIntEnv(env['LLM_GROQ_MAX_RETRIES'], 1)),
+  };
+
+  return [gemini, groq];
+}
+
+// ---------------------------------------------------------------------------
+// Known models catalog (used by GET /api/llm/providers/models)
+// ---------------------------------------------------------------------------
+
+export type ModelTier = 'free' | 'paid';
+
+export interface ModelInfo {
+  id: string;
+  tier: ModelTier;
+}
+
+export const KNOWN_PROVIDER_MODELS: Record<
+  LlmProviderId,
+  { models: ModelInfo[]; default: string }
+> = {
+  gemini: {
+    models: [
+      { id: 'gemini-2.5-flash',       tier: 'free' },
+      { id: 'gemini-2.5-flash-lite',  tier: 'free' },
+      { id: 'gemini-2.0-flash',       tier: 'free' },
+      { id: 'gemini-2.0-flash-lite',  tier: 'free' },
+      { id: 'gemini-2.5-pro',         tier: 'paid' },
+      { id: 'gemini-3-flash-preview',  tier: 'free' },
+      { id: 'gemini-3.1-flash-lite',  tier: 'free' },
+      { id: 'gemini-3.5-flash',       tier: 'free' },
+      { id: 'gemini-3.1-pro-preview', tier: 'paid' },
+    ],
+    default: 'gemini-2.5-flash',
+  },
+  groq: {
+    models: [
+      { id: 'llama-3.1-8b-instant',                        tier: 'free' },
+      { id: 'llama-3.3-70b-versatile',                     tier: 'free' },
+      { id: 'meta-llama/llama-4-scout-17b-16e-instruct',   tier: 'free' },
+      { id: 'qwen/qwen3-32b',                              tier: 'free' },
+      { id: 'openai/gpt-oss-20b',                          tier: 'free' },
+      { id: 'openai/gpt-oss-120b',                         tier: 'free' },
+      { id: 'groq/compound',                               tier: 'free' },
+      { id: 'groq/compound-mini',                          tier: 'free' },
+      { id: 'allam-2-7b',                                  tier: 'free' },
+    ],
+    default: 'llama-3.3-70b-versatile',
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Public query helpers
+// ---------------------------------------------------------------------------
+
+export function getEnabledProvidersByPriority(config: AppConfig): LlmProviderConfig[] {
+  return config.llmProviders
+    .filter((provider) => provider.enabled)
+    .sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
+}
+
+export function getSafeConfig(config: AppConfig): SafeAppConfig {
+  return {
+    ...config,
+    llmProviders: config.llmProviders.map((provider) => ({
+      id: provider.id,
+      enabled: provider.enabled,
+      priority: provider.priority,
+      model: provider.model,
+      apiKeyConfigured: Boolean(provider.apiKey),
+      timeoutMs: provider.timeoutMs,
+      maxRetries: provider.maxRetries,
+    })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Validation (separated so both strict loader + ConfigStore can use it)
+// ---------------------------------------------------------------------------
+
+/** Returns an array of human-readable error strings; empty = valid. */
+export function validateAppConfig(config: AppConfig): string[] {
+  const errors: string[] = [];
+
+  if (!config.target.url.trim()) {
+    errors.push('target.url (TARGET_URL) is required');
+  }
+  if (!config.notifications.discordWebhookUrl.trim()) {
+    errors.push('notifications.discordWebhookUrl (DISCORD_WEBHOOK_URL) is required');
+  }
+
+  const enabled = getEnabledProvidersByPriority(config);
+  if (enabled.length === 0) {
+    errors.push('At least one LLM provider must be enabled');
+  }
+  for (const p of enabled) {
+    if (!p.apiKey) {
+      errors.push(`Provider '${p.id}' is enabled but has no API key configured`);
+    }
+  }
+
+  return errors;
+}
+
+// ---------------------------------------------------------------------------
+// JSON config file loader
+// ---------------------------------------------------------------------------
+
+/**
+ * Shape of config.json — all fields optional so partial files work fine.
+ * Secrets live here instead of env vars when this file is present.
+ */
+export interface JsonConfig {
+  targetUrl?: string;
+  targetSelector?: string;
+  checkIntervalMs?: number;
+  runOnce?: boolean;
+  discordWebhookUrl?: string;
+  apiPort?: number;
+  plugins?: string[];
+
+  llm?: {
+    gemini?: {
+      enabled?: boolean;
+      apiKey?: string;
+      model?: string;
+      priority?: number;
+      timeoutMs?: number;
+      maxRetries?: number;
+    };
+    groq?: {
+      enabled?: boolean;
+      apiKey?: string;
+      model?: string;
+      priority?: number;
+      timeoutMs?: number;
+      maxRetries?: number;
+    };
+  };
+
+  browser?: {
+    headless?: boolean;
+    persistSession?: boolean;
+    userDataDir?: string;
+    gotoTimeoutMs?: number;
+    slowMoMs?: number;
+    keepOpenMs?: number;
+    manualAssisted?: boolean;
+    manualAssistedInitialWaitMs?: number;
+  };
+}
+
+const CONFIG_FILE_NAME = 'config.json';
+
+function resolveConfigPath(): string {
+  // Walk up from the compiled file location to find the project root
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(dir, '..', CONFIG_FILE_NAME);
+}
+
+/**
+ * Reads config.json from the project root.
+ * Returns null if the file doesn't exist (not an error — fall back to env).
+ * Throws on malformed JSON.
+ */
+export function readJsonConfig(filePath = resolveConfigPath()): JsonConfig | null {
+  if (!fs.existsSync(filePath)) return null;
+  const raw = fs.readFileSync(filePath, 'utf-8');
+  return JSON.parse(raw) as JsonConfig;
+}
+
+/**
+ * Merges a JsonConfig onto a NodeJS.ProcessEnv-shaped object so the existing
+ * env-based loaders can consume it transparently.  JSON values win over env.
+ */
+function jsonToEnv(json: JsonConfig, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base };
+
+  if (json.targetUrl !== undefined)         env['TARGET_URL']              = json.targetUrl;
+  if (json.targetSelector !== undefined)    env['TARGET_SELECTOR']         = json.targetSelector;
+  if (json.checkIntervalMs !== undefined)   env['CHECK_INTERVAL_MS']       = String(json.checkIntervalMs);
+  if (json.runOnce !== undefined)           env['RUN_ONCE']                = String(json.runOnce);
+  if (json.discordWebhookUrl !== undefined) env['DISCORD_WEBHOOK_URL']     = json.discordWebhookUrl;
+  if (json.apiPort !== undefined)           env['API_PORT']                = String(json.apiPort);
+  if (json.plugins !== undefined)           env['PLUGINS']                 = json.plugins.join(',');
+
+  const g = json.llm?.gemini;
+  if (g) {
+    if (g.enabled !== undefined)    env['LLM_GEMINI_ENABLED']     = String(g.enabled);
+    if (g.apiKey !== undefined)     env['GEMINI_API_KEY']          = g.apiKey;
+    if (g.model !== undefined)      env['LLM_GEMINI_MODEL']        = g.model;
+    if (g.priority !== undefined)   env['LLM_GEMINI_PRIORITY']     = String(g.priority);
+    if (g.timeoutMs !== undefined)  env['LLM_GEMINI_TIMEOUT_MS']   = String(g.timeoutMs);
+    if (g.maxRetries !== undefined) env['LLM_GEMINI_MAX_RETRIES']  = String(g.maxRetries);
+  }
+
+  const gr = json.llm?.groq;
+  if (gr) {
+    if (gr.enabled !== undefined)    env['LLM_GROQ_ENABLED']     = String(gr.enabled);
+    if (gr.apiKey !== undefined)     env['GROQ_API_KEY']          = gr.apiKey;
+    if (gr.model !== undefined)      env['LLM_GROQ_MODEL']        = gr.model;
+    if (gr.priority !== undefined)   env['LLM_GROQ_PRIORITY']     = String(gr.priority);
+    if (gr.timeoutMs !== undefined)  env['LLM_GROQ_TIMEOUT_MS']   = String(gr.timeoutMs);
+    if (gr.maxRetries !== undefined) env['LLM_GROQ_MAX_RETRIES']  = String(gr.maxRetries);
+  }
+
+  const b = json.browser;
+  if (b) {
+    if (b.headless !== undefined)                    env['BROWSER_HEADLESS']                      = String(b.headless);
+    if (b.persistSession !== undefined)              env['BROWSER_PERSIST_SESSION']               = String(b.persistSession);
+    if (b.userDataDir !== undefined)                 env['BROWSER_USER_DATA_DIR']                 = b.userDataDir;
+    if (b.gotoTimeoutMs !== undefined)               env['BROWSER_GOTO_TIMEOUT_MS']               = String(b.gotoTimeoutMs);
+    if (b.slowMoMs !== undefined)                    env['BROWSER_SLOW_MO_MS']                    = String(b.slowMoMs);
+    if (b.keepOpenMs !== undefined)                  env['BROWSER_KEEP_OPEN_MS']                  = String(b.keepOpenMs);
+    if (b.manualAssisted !== undefined)              env['MANUAL_ASSISTED']                       = String(b.manualAssisted);
+    if (b.manualAssistedInitialWaitMs !== undefined) env['MANUAL_ASSISTED_INITIAL_WAIT_MS']       = String(b.manualAssistedInitialWaitMs);
+  }
+
+  return env;
+}
+
+/**
+ * Converts a live AppConfig back into the JsonConfig shape and writes it to
+ * config.json.  Called after every API mutation so the file stays in sync.
+ * No-ops silently if the file doesn't exist yet (env-var-only setups).
+ */
+export function saveJsonConfig(config: AppConfig, filePath = resolveConfigPath()): void {
+  const gemini = config.llmProviders.find((p) => p.id === 'gemini');
+  const groq   = config.llmProviders.find((p) => p.id === 'groq');
+
+  const json: JsonConfig = {
+    targetUrl:          config.target.url,
+    targetSelector:     config.target.selector,
+    checkIntervalMs:    config.schedule.intervalMs,
+    runOnce:            config.schedule.runOnce,
+    discordWebhookUrl:  config.notifications.discordWebhookUrl,
+
+    llm: {
+      gemini: gemini ? {
+        enabled:    gemini.enabled,
+        apiKey:     gemini.apiKey,
+        model:      gemini.model,
+        priority:   gemini.priority,
+        timeoutMs:  gemini.timeoutMs,
+        maxRetries: gemini.maxRetries,
+      } : undefined,
+      groq: groq ? {
+        enabled:    groq.enabled,
+        apiKey:     groq.apiKey,
+        model:      groq.model,
+        priority:   groq.priority,
+        timeoutMs:  groq.timeoutMs,
+        maxRetries: groq.maxRetries,
+      } : undefined,
+    },
+
+    browser: {
+      headless:                    config.browser.headless,
+      persistSession:              config.browser.persistSession,
+      userDataDir:                 config.browser.userDataDir,
+      gotoTimeoutMs:               config.browser.gotoTimeoutMs,
+      slowMoMs:                    config.browser.slowMoMs,
+      keepOpenMs:                  config.browser.keepOpenMs,
+      manualAssisted:              config.browser.manualAssisted,
+      manualAssistedInitialWaitMs: config.browser.manualAssistedInitialWaitMs,
+    },
+    plugins: config.plugins.length > 0 ? config.plugins : undefined,
+  };
+
+  fs.writeFileSync(filePath, JSON.stringify(json, null, 2), 'utf-8');
+}
+
+/**
+ * Resolves the effective env: config.json values override process.env.
+ * Falls back to process.env if no config.json is present.
+ */
+export function resolveEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  try {
+    const json = readJsonConfig();
+    if (json) {
+      console.log(`[config] Loaded config.json`);
+      return jsonToEnv(json, base);
+    }
+  } catch (err) {
+    console.warn(`[config] Failed to parse config.json: ${err instanceof Error ? err.message : err}. Falling back to env.`);
+  }
+  return base;
+}
+
+// ---------------------------------------------------------------------------
+// Strict config loader (existing behaviour — throws on invalid)
+// ---------------------------------------------------------------------------
+
+export function loadAppConfig(env: NodeJS.ProcessEnv = resolveEnv()): AppConfig {
+  const manualAssisted = parseBooleanEnv(env['MANUAL_ASSISTED'], false);
+  const persistSession = manualAssisted || parseBooleanEnv(env['BROWSER_PERSIST_SESSION'], true);
+
+  const config: AppConfig = {
+    target: {
+      url: requireEnv('TARGET_URL', env),
+      selector: env['TARGET_SELECTOR'] ?? '',
+    },
+    schedule: {
+      intervalMs: Math.max(1_000, parseIntEnv(env['CHECK_INTERVAL_MS'], 300_000)),
+      runOnce: parseBooleanEnv(env['RUN_ONCE'], false),
+    },
+    browser: {
+      manualAssisted,
+      manualAssistedInitialWaitMs: Math.max(0, parseIntEnv(env['MANUAL_ASSISTED_INITIAL_WAIT_MS'], 120_000)),
+      persistSession,
+      headless: manualAssisted ? false : parseBooleanEnv(env['BROWSER_HEADLESS'], true),
+      slowMoMs: Math.max(0, parseIntEnv(env['BROWSER_SLOW_MO_MS'], 0)),
+      keepOpenMs: Math.max(0, parseIntEnv(env['BROWSER_KEEP_OPEN_MS'], 0)),
+      gotoTimeoutMs: Math.max(10_000, parseIntEnv(env['BROWSER_GOTO_TIMEOUT_MS'], 60_000)),
+      userDataDir: env['BROWSER_USER_DATA_DIR'] || '.browser-profile',
+    },
+    notifications: {
+      discordWebhookUrl: requireEnv('DISCORD_WEBHOOK_URL', env),
+    },
+    llmProviders: parseProviderConfig(env),
+    plugins: env['PLUGINS'] ? env['PLUGINS'].split(',').map(s => s.trim()).filter(Boolean) : [],
+  };
+
+  const errors = validateAppConfig(config);
+  if (errors.length > 0) {
+    throw new Error(errors.join('; '));
+  }
+
+  return config;
+}
+
+// ---------------------------------------------------------------------------
+// Lenient config loader (API-server mode — no throws for missing fields)
+// ---------------------------------------------------------------------------
+
+/**
+ * Loads config from env without requiring TARGET_URL / DISCORD_WEBHOOK_URL.
+ * Missing fields default to empty string.  Used when the API server is the
+ * primary entry-point and the user will configure fields via the API.
+ */
+export function loadAppConfigLenient(env: NodeJS.ProcessEnv = resolveEnv()): AppConfig {
+  const manualAssisted = parseBooleanEnv(env['MANUAL_ASSISTED'], false);
+  const persistSession = manualAssisted || parseBooleanEnv(env['BROWSER_PERSIST_SESSION'], true);
+
+  return {
+    target: {
+      url: env['TARGET_URL'] ?? '',
+      selector: env['TARGET_SELECTOR'] ?? '',
+    },
+    schedule: {
+      intervalMs: Math.max(1_000, parseIntEnv(env['CHECK_INTERVAL_MS'], 300_000)),
+      runOnce: parseBooleanEnv(env['RUN_ONCE'], false),
+    },
+    browser: {
+      manualAssisted,
+      manualAssistedInitialWaitMs: Math.max(0, parseIntEnv(env['MANUAL_ASSISTED_INITIAL_WAIT_MS'], 120_000)),
+      persistSession,
+      headless: manualAssisted ? false : parseBooleanEnv(env['BROWSER_HEADLESS'], true),
+      slowMoMs: Math.max(0, parseIntEnv(env['BROWSER_SLOW_MO_MS'], 0)),
+      keepOpenMs: Math.max(0, parseIntEnv(env['BROWSER_KEEP_OPEN_MS'], 0)),
+      gotoTimeoutMs: Math.max(10_000, parseIntEnv(env['BROWSER_GOTO_TIMEOUT_MS'], 60_000)),
+      userDataDir: env['BROWSER_USER_DATA_DIR'] || '.browser-profile',
+    },
+    notifications: {
+      discordWebhookUrl: env['DISCORD_WEBHOOK_URL'] ?? '',
+    },
+    llmProviders: parseProviderConfig(env),
+    plugins: env['PLUGINS'] ? env['PLUGINS'].split(',').map(s => s.trim()).filter(Boolean) : [],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Runtime mutable config store
+// ---------------------------------------------------------------------------
+
+/**
+ * Holds a mutable copy of AppConfig for runtime updates via the REST API.
+ * API keys in provider configs are preserved across safe-view projections.
+ */
+export class ConfigStore {
+  private config: AppConfig;
+
+  constructor(initial: AppConfig) {
+    this.config = structuredClone(initial);
+  }
+
+  /** Returns the live config (with API keys). */
+  get(): AppConfig {
+    return this.config;
+  }
+
+  /** Returns the API-safe view (no raw API keys). */
+  getSafe(): SafeAppConfig {
+    return getSafeConfig(this.config);
+  }
+
+  /** Replace the full config. */
+  set(config: AppConfig): void {
+    this.config = structuredClone(config);
+  }
+
+  /** Merge a partial config update (shallow merge per section). */
+  update(updates: Partial<AppConfig>): void {
+    if (updates.target) {
+      this.config.target = { ...this.config.target, ...updates.target };
+    }
+    if (updates.schedule) {
+      this.config.schedule = { ...this.config.schedule, ...updates.schedule };
+    }
+    if (updates.browser) {
+      this.config.browser = { ...this.config.browser, ...updates.browser };
+    }
+    if (updates.notifications) {
+      this.config.notifications = { ...this.config.notifications, ...updates.notifications };
+    }
+    if (updates.llmProviders) {
+      // Merge by provider id — preserves existing API keys unless explicitly overwritten
+      const current = new Map(this.config.llmProviders.map((p) => [p.id, p]));
+      for (const incoming of updates.llmProviders) {
+        const existing = current.get(incoming.id);
+        current.set(incoming.id, existing ? { ...existing, ...incoming } : incoming);
+      }
+      this.config.llmProviders = Array.from(current.values());
+    }
+  }
+
+  /** Returns validation errors; empty array = ready to monitor. */
+  validate(): string[] {
+    return validateAppConfig(this.config);
+  }
+}

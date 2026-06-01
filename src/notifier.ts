@@ -9,16 +9,16 @@ export async function sendDiscordAlert(
   summary: string
 ): Promise<void> {
   const safeUrl = truncateForDiscordField(url, 1024);
-  const safeSummary = truncateForDiscordField(summary, 1024);
+  const safeDescription = truncateForDiscordField(summary, 4096); // embed description limit
 
   const payload = {
     embeds: [
       {
         title: '🔔 Website Change Detected',
+        description: safeDescription,
         color: 0xf59e0b, // amber
         fields: [
           { name: 'URL', value: safeUrl, inline: false },
-          { name: 'Summary', value: safeSummary, inline: false },
         ],
         footer: { text: 'Website Monitor Agent' },
         timestamp: new Date().toISOString(),

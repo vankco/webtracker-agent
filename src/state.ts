@@ -7,6 +7,8 @@ export interface MonitorState {
   url: string;
   lastContent: string;
   lastChecked: string;
+  /** Structured product data stored by site plugins. Shape is plugin-defined. */
+  lastProducts?: unknown[];
 }
 
 export function loadState(): MonitorState | null {

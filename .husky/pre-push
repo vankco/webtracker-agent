@@ -1,0 +1,12 @@
+echo "Running pre-push checks..."
+
+echo "→ Typecheck (root)..."
+npm run typecheck || { echo "✗ Typecheck failed. Push aborted."; exit 1; }
+
+echo "→ Typecheck (client)..."
+npm run client:typecheck || { echo "✗ Client typecheck failed. Push aborted."; exit 1; }
+
+echo "→ Tests & coverage..."
+npm run test:coverage || { echo "✗ Tests/coverage failed. Push aborted."; exit 1; }
+
+echo "✓ All checks passed."

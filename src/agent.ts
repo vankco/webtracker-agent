@@ -1,148 +1,104 @@
 import 'dotenv/config';
-import { closeScraperSession, scrapePageText } from './scraper.js';
-import { analyzeChanges } from './analyzer.js';
-import { sendDiscordAlert } from './notifier.js';
-import { loadState, saveState } from './state.js';
+import {
+  loadAppConfig,
+  loadAppConfigLenient,
+  resolveEnv,
+  ConfigStore,
+  getEnabledProvidersByPriority,
+  type LlmProviderConfig,
+} from './config.js';
+import { MonitorController } from './monitor-controller.js';
+import { startApiServer } from './api.js';
+import { loadPlugins } from './plugin-registry.js';
 
-let shuttingDown = false;
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-async function shutdown(reason: string): Promise<void> {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  console.log(`Shutting down monitor (${reason})...`);
-  await closeScraperSession();
+function parseIntEnv(value: string | undefined, defaultValue: number): number {
+  if (value == null || value.trim() === '') return defaultValue;
+  const parsed = parseInt(value, 10);
+  return Number.isNaN(parsed) ? defaultValue : parsed;
 }
 
-process.on('SIGINT', () => {
-  void shutdown('SIGINT').finally(() => process.exit(0));
-});
-
-process.on('SIGTERM', () => {
-  void shutdown('SIGTERM').finally(() => process.exit(0));
-});
-
-function getEnv(key: string): string {
-  const val = process.env[key];
-  if (!val) throw new Error(`Missing required env variable: ${key}`);
-  return val;
-}
-
-function logNextCheckTime(intervalMs: number): void {
-  const nextCheck = new Date(Date.now() + intervalMs);
-  console.log(`Monitoring active — next check at ${nextCheck.toLocaleString()}`);
-}
-
-function chunkSummaryForAlerts(summary: string, maxChunkLen = 900, maxAlerts = 10): string[] {
-  const normalized = summary.trim();
-  if (normalized.length <= maxChunkLen) {
-    return [normalized];
-  }
-
-  const chunks: string[] = [];
-  let remaining = normalized;
-
-  while (remaining.length > 0 && chunks.length < maxAlerts) {
-    if (remaining.length <= maxChunkLen) {
-      chunks.push(remaining.trim());
-      break;
-    }
-
-    let splitAt = remaining.lastIndexOf(' ', maxChunkLen);
-    if (splitAt <= 0) {
-      splitAt = maxChunkLen;
-    }
-
-    chunks.push(remaining.slice(0, splitAt).trim());
-    remaining = remaining.slice(splitAt).trim();
-  }
-
-  if (remaining.length > 0 && chunks.length > 0) {
-    chunks[chunks.length - 1] = `${chunks[chunks.length - 1]} ...[truncated]`;
-  }
-
-  if (chunks.length === 1) {
-    return chunks;
-  }
-
-  return chunks.map((chunk, index) => `Part ${index + 1}/${chunks.length}: ${chunk}`);
-}
-
-async function runCheck(): Promise<void> {
-  const targetUrl = getEnv('TARGET_URL');
-  const geminiKey = getEnv('GEMINI_API_KEY');
-  const discordUrl = getEnv('DISCORD_WEBHOOK_URL');
-  const selector = process.env['TARGET_SELECTOR'] ?? '';
-
-  console.log(`[${new Date().toISOString()}] Checking: ${targetUrl}`);
-
-  const currentContent = await scrapePageText(targetUrl, selector);
-  const previousState = loadState();
-
-  if (!previousState) {
-    console.log('No previous state found — saving baseline. Will start alerting on next run.');
-    saveState({ url: targetUrl, lastContent: currentContent, lastChecked: new Date().toISOString() });
-    return;
-  }
-
-  if (currentContent === previousState.lastContent) {
-    console.log('No meaningful change: exact text match (skipped Gemini analysis).');
-    saveState({ url: targetUrl, lastContent: currentContent, lastChecked: new Date().toISOString() });
-    return;
-  }
-
-  const { changed, summary } = await analyzeChanges(
-    targetUrl,
-    previousState.lastContent,
-    currentContent,
-    geminiKey
-  );
-
-  if (changed) {
-    console.log(`Change detected: ${summary}`);
-    const alertSummaries = chunkSummaryForAlerts(summary);
-    for (const alertSummary of alertSummaries) {
-      await sendDiscordAlert(discordUrl, targetUrl, alertSummary);
-    }
-    console.log(`Discord alert sent ✓ (${alertSummaries.length} message${alertSummaries.length === 1 ? '' : 's'})`);
-  } else {
-    console.log(`No meaningful change: ${summary}`);
-  }
-
-  saveState({ url: targetUrl, lastContent: currentContent, lastChecked: new Date().toISOString() });
-}
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const intervalMs = parseInt(process.env['CHECK_INTERVAL_MS'] ?? '300000', 10);
-  const runOnce = (process.env['RUN_ONCE'] ?? '').trim().toLowerCase() === 'true';
+  const apiPortRaw = process.env['API_PORT'];
+  const apiPort = apiPortRaw ? parseIntEnv(apiPortRaw, 0) : 0;
+  const apiMode = apiPort > 0;
 
-  // Run immediately on startup
-  try {
-    await runCheck();
-  } catch (err) {
-    console.error('Initial check failed:', err);
-  }
+  if (apiMode) {
+    // -------------------------------------------------------------------
+    // API-server mode:
+    //   1. Load config leniently (missing TARGET_URL / Discord URL are OK).
+    //   2. Start the Express API server — UI/operator configures via REST.
+    //   3. Do NOT auto-start the monitor loop; POST /api/monitor/start does it.
+    // -------------------------------------------------------------------
+    const initial = loadAppConfigLenient(resolveEnv());
+    const configStore = new ConfigStore(initial);
+    const registry = await loadPlugins(initial.plugins);
+    const monitorController = new MonitorController({}, registry);
 
-  if (runOnce) {
-    console.log('Run-once mode complete. Exiting.');
-    return;
-  }
-
-  // Then repeat on the configured interval
-  setInterval(async () => {
-    try {
-      await runCheck();
-    } catch (err) {
-      console.error('Check failed:', err);
-    } finally {
-      logNextCheckTime(intervalMs);
+    const enabledProviders = getEnabledProvidersByPriority(initial);
+    if (enabledProviders.length > 0) {
+      console.log(
+        `[agent] LLM providers (from env): ${enabledProviders.map((p: LlmProviderConfig) => `${p.id}:${p.model}`).join(', ')}`
+      );
+    } else {
+      console.log('[agent] No LLM providers configured from env — configure via API.');
     }
-  }, intervalMs);
 
-  logNextCheckTime(intervalMs);
+    startApiServer(configStore, monitorController, apiPort);
+    registerSignalHandlers(monitorController);
+
+    // Auto-start the monitor if config is already valid (target URL + credentials set)
+    const validationErrors = configStore.validate();
+    if (validationErrors.length === 0) {
+      console.log('[agent] Config is valid — auto-starting monitor.');
+      monitorController.start(configStore).catch((err: unknown) => {
+        console.error('[agent] Auto-start failed:', err);
+      });
+    } else {
+      console.log('[agent] Monitor not auto-started — configure via UI first.');
+    }
+  } else {
+    // -------------------------------------------------------------------
+    // Classic CLI mode (backward-compatible):
+    //   Strict config load → immediate monitor loop.
+    // -------------------------------------------------------------------
+    const config = loadAppConfig(resolveEnv());
+    const enabledProviders = getEnabledProvidersByPriority(config)
+      .map((p: LlmProviderConfig) => `${p.id}:${p.model}`)
+      .join(', ');
+    console.log(`[agent] LLM providers by priority: ${enabledProviders}`);
+
+    const configStore = new ConfigStore(config);
+    const registry = await loadPlugins(config.plugins);
+    const monitorController = new MonitorController({}, registry);
+
+    registerSignalHandlers(monitorController);
+    await monitorController.start(configStore);
+  }
 }
 
-main().catch((err) => {
-  console.error('Fatal error:', err);
-  void shutdown('fatal error');
+function registerSignalHandlers(monitorController: MonitorController): void {
+  let shuttingDown = false;
+
+  const onSignal = (reason: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[agent] Shutting down (${reason})…`);
+    void monitorController.stop().finally(() => process.exit(0));
+  };
+
+  process.on('SIGINT', () => onSignal('SIGINT'));
+  process.on('SIGTERM', () => onSignal('SIGTERM'));
+}
+
+main().catch((err: unknown) => {
+  console.error('[agent] Fatal error:', err);
   process.exitCode = 1;
 });

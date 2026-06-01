@@ -1,0 +1,6 @@
+{
+  "name": "@webtracker/plugin-hermes",
+  "version": "1.0.0",
+  "description": "WebTracker Agent plugin for Hermès product availability tracking",
+  "main": "index.ts"
+}
