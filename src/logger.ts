@@ -20,6 +20,14 @@ const MAX_ENTRIES = 500;
 let nextId = 1;
 const entries: LogEntry[] = [];
 
+type AlertCallback = (entry: LogEntry) => void;
+let alertCallback: AlertCallback | null = null;
+
+/** Register a callback that fires on every warn/error log entry. */
+export function setAlertCallback(cb: AlertCallback): void {
+  alertCallback = cb;
+}
+
 export function log(
   level: LogLevel,
   category: LogCategory,
@@ -38,6 +46,10 @@ export function log(
   entries.push(entry);
   if (entries.length > MAX_ENTRIES) {
     entries.shift();
+  }
+
+  if ((level === 'warn' || level === 'error') && alertCallback) {
+    alertCallback(entry);
   }
 }
 
