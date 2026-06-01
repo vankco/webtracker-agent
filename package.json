@@ -2,6 +2,7 @@
   "name": "website-monitor-agent",
   "version": "1.0.0",
   "description": "AI-powered website change monitor using Playwright + Gemini + Discord",
+  "workspaces": ["plugins/*"],
   "scripts": {
     "start": "tsx src/agent.ts",
     "dev": "tsx --watch src/agent.ts",

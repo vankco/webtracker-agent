@@ -1,5 +1,24 @@
 import type { Page } from 'playwright';
-import type { SitePlugin, PluginDiff } from '../../src/plugin-types.js';
+
+// Matches the SitePlugin / PluginDiff interfaces in src/plugin-types.ts.
+// Defined inline so this package has no dependency on the main app's source tree.
+interface PluginDiff {
+  hasChanges: boolean;
+  summary: string;
+  alertBody: string;
+  requestLlmFallback?: boolean;
+}
+
+interface SitePlugin {
+  name: string;
+  matches(url: string): boolean;
+  extractProducts(page: Page): Promise<unknown[]>;
+  productsToText(products: unknown[]): string;
+  parseProductLine(line: string): unknown;
+  filterAvailable(products: unknown[]): unknown[];
+  diff(oldProducts: unknown[], newProducts: unknown[]): PluginDiff;
+  formatBaselineMessage(available: unknown[]): string;
+}
 
 // ---------------------------------------------------------------------------
 // Types
