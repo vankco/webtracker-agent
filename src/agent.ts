@@ -52,10 +52,18 @@ async function main(): Promise<void> {
     }
 
     startApiServer(configStore, monitorController, apiPort);
-
-    // Keep process alive — the API server's socket does this, but also
-    // register graceful shutdown handlers.
     registerSignalHandlers(monitorController);
+
+    // Auto-start the monitor if config is already valid (target URL + credentials set)
+    const validationErrors = configStore.validate();
+    if (validationErrors.length === 0) {
+      console.log('[agent] Config is valid — auto-starting monitor.');
+      monitorController.start(configStore).catch((err: unknown) => {
+        console.error('[agent] Auto-start failed:', err);
+      });
+    } else {
+      console.log('[agent] Monitor not auto-started — configure via UI first.');
+    }
   } else {
     // -------------------------------------------------------------------
     // Classic CLI mode (backward-compatible):

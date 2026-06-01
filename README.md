@@ -86,11 +86,12 @@ Create `config.json` in the project root with your values:
 ### API + UI together (recommended)
 
 ```bash
-npm run dev:all
+npm start
 ```
 
 - API runs on `http://localhost:3001`
 - UI runs on `http://localhost:5173`
+- If `config.json` is fully configured, the monitor starts automatically
 
 ### API only
 
