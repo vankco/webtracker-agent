@@ -8,11 +8,11 @@ AI-powered website change monitor. Watches a page for meaningful changes and sen
 
 1. Playwright scrapes the target page on a schedule
 2. If the content changed:
-   - **Hermès URLs** — a deterministic structured diff is computed (no LLM). Added, removed, and price-changed products are identified by SKU and sent directly to Discord.
+   - **Plugin URL** — if a site plugin matches the target URL, it runs a deterministic structured diff (no LLM needed). Added, removed, and changed items are identified and sent directly to Discord.
    - **All other URLs** — the old and new content are sent to an LLM (Gemini or Groq) for analysis. The LLM decides if the change is meaningful and writes a summary.
 3. A Discord alert is sent with the result
 4. If all LLM providers fail, a local text-diff fallback is used (generic sites only)
-5. On first run with no prior state, Hermès sends a baseline alert listing all currently available products
+5. On first run with no prior state, plugins send a baseline alert listing all currently tracked items
 
 ---
 
@@ -36,11 +36,7 @@ cd client && npm install && cd ..
 
 ### 2. Create your config file
 
-```bash
-cp config.json.example config.json
-```
-
-Edit `config.json` with your real values:
+Create `config.json` in the project root with your values:
 
 ```json
 {
@@ -75,7 +71,9 @@ Edit `config.json` with your real values:
     "persistSession": true,
     "userDataDir": ".browser-profile",
     "gotoTimeoutMs": 60000
-  }
+  },
+
+  "plugins": ["@webtracker/plugin-hermes"]
 }
 ```
 
@@ -161,6 +159,43 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 | `browser.headless` | `true` | Run browser without a visible window |
 | `browser.persistSession` | `true` | Reuse cookies/login state between runs |
 | `browser.userDataDir` | `.browser-profile` | Where browser session data is stored |
+| `plugins` | `[]` | List of site plugin package names to load |
+
+---
+
+## Site plugins
+
+Plugins add deterministic change detection for specific sites — no LLM needed. The Hermès plugin is included out of the box.
+
+### Using the Hermès plugin
+
+Add it to `config.json`:
+
+```json
+{
+  "plugins": ["@webtracker/plugin-hermes"]
+}
+```
+
+When the target URL contains `hermes.com`, the plugin:
+- Extracts all products from the page by SKU
+- Diffs available products between runs (added / removed / price changed)
+- Sends a structured Discord alert — no LLM call required
+
+### Writing your own plugin
+
+1. Create `plugins/your-plugin/package.json`:
+```json
+{ "name": "@webtracker/plugin-your-plugin", "version": "1.0.0", "main": "index.ts" }
+```
+
+2. Create `plugins/your-plugin/index.ts` implementing the `SitePlugin` interface (copy `plugins/hermes/index.ts` as a template)
+
+3. Run `npm install` — npm workspaces symlinks it automatically
+
+4. Add `"@webtracker/plugin-your-plugin"` to the `plugins` array in `config.json`
+
+If no plugin matches the target URL, the app falls back to LLM-based analysis automatically.
 
 ---
 
@@ -221,24 +256,28 @@ npm run test:coverage   # with coverage report (≥80% required)
 
 ```
 src/
-  agent.ts           — entry point, starts API server or CLI loop
-  api.ts             — Express REST API (10 endpoints)
-  config.ts          — config loading (config.json → env → defaults)
+  agent.ts              — entry point, starts API server or CLI loop
+  api.ts                — Express REST API (10 endpoints)
+  config.ts             — config loading (config.json → env → defaults)
   monitor-controller.ts — monitor loop lifecycle (start/stop/status)
-  llm.ts             — LLM provider orchestration and failover
-  analyzer.ts        — Gemini adapter + local diff fallback
-  scraper.ts         — Playwright browser automation
-  notifier.ts        — Discord webhook alerts
-  state.ts           — persist last scrape to state.json
-  api-types.ts       — shared TypeScript types for the API
+  plugin-types.ts       — SitePlugin / PluginDiff interfaces
+  plugin-registry.ts    — plugin loader and registry
+  llm.ts                — LLM provider orchestration and failover
+  analyzer.ts           — Gemini adapter + local diff fallback
+  scraper.ts            — Playwright browser automation
+  notifier.ts           — Discord webhook alerts
+  state.ts              — persist last scrape to state.json
+  api-types.ts          — shared TypeScript types for the API
+
+plugins/
+  hermes/               — @webtracker/plugin-hermes (Hermès product tracker)
 
 client/
   src/pages/
-    MonitorPage.tsx   — monitor controls and status
-    ProvidersPage.tsx — LLM provider management
-    ConfigPage.tsx    — app configuration
-    DebugLogPage.tsx  — live structured event log
+    MonitorPage.tsx     — monitor controls and status
+    ProvidersPage.tsx   — LLM provider management
+    ConfigPage.tsx      — app configuration
+    DebugLogPage.tsx    — live structured event log
 
-config.json          — your local config (gitignored)
-config.json.example  — template to copy from
+config.json             — your local config (gitignored)
 ```
