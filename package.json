@@ -1,8 +1,10 @@
 {
   "name": "website-monitor-agent",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "AI-powered website change monitor using Playwright + Gemini + Discord",
-  "workspaces": ["plugins/*"],
+  "workspaces": [
+    "plugins/*"
+  ],
   "scripts": {
     "start": "API_PORT=3001 concurrently -n api,ui -c cyan,magenta \"tsx --watch src/agent.ts\" \"npm run client:dev\"",
     "stop": "lsof -ti:3001,5173 | xargs kill -9 2>/dev/null || true",
