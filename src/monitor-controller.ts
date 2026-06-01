@@ -378,7 +378,9 @@ function chunkSummaryForAlerts(summary: string, maxChunkLen = 900, maxAlerts = 1
       chunks.push(remaining.trim());
       break;
     }
-    let splitAt = remaining.lastIndexOf(' ', maxChunkLen);
+    // Prefer splitting at a newline to avoid breaking mid-word or mid-link
+    let splitAt = remaining.lastIndexOf('\n', maxChunkLen);
+    if (splitAt <= 0) splitAt = remaining.lastIndexOf(' ', maxChunkLen);
     if (splitAt <= 0) splitAt = maxChunkLen;
     chunks.push(remaining.slice(0, splitAt).trim());
     remaining = remaining.slice(splitAt).trim();
