@@ -22,6 +22,7 @@ import type {
   ValidateScrapeRequest,
   ValidateScrapeResponse,
   GetLogsResponse,
+  PredictionResult,
 } from './types.js';
 
 const BASE = '/api';
@@ -108,6 +109,9 @@ export const api = {
     scrape: (body: ValidateScrapeRequest): Promise<ValidateScrapeResponse> =>
       request('POST', '/validate/scrape', body),
   },
+
+  predict: (): Promise<PredictionResult> =>
+    request('POST', '/predict'),
 
   logs: {
     get: (): Promise<GetLogsResponse> =>

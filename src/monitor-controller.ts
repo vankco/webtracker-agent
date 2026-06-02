@@ -76,6 +76,11 @@ export class MonitorController {
     return this.running;
   }
 
+  /** Resolve the site plugin matching a URL, if any. */
+  findPlugin(url: string): SitePlugin | null {
+    return this.registry.findForUrl(url);
+  }
+
   getStatus(configStore: ConfigStore): MonitorStatus {
     const config = configStore.get();
     return {

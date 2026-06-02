@@ -127,6 +127,7 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 - **Last Check / Next Check** — when the last check ran and when the next is scheduled (Next Check only shown while running)
 - **Last Result** — the LLM's analysis from the most recent check, including provider, model, and latency
 - **Recent Fetched Content** — last 2 scraped snapshots with timestamp, character count, and first 500 chars preview
+- **Predictions** — for plugin URLs with collected history, click "Run Prediction" to have an LLM forecast likely restocks, sellouts, and price trends from the time-series data. Requires at least 3 recorded change events.
 - **Recent Errors** — scrape failures, empty content warnings, etc.
 - **Schedule Controls** — change the check interval or enable run-once mode without restarting
 - **Scrape Validator** — test a URL + CSS selector before starting the monitor; shows a content preview and character count

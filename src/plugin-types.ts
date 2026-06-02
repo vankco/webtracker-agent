@@ -1,4 +1,5 @@
 import type { Page } from 'playwright';
+import type { HistoryEntry } from './state.js';
 
 export interface PluginDiff {
   hasChanges: boolean;
@@ -17,4 +18,6 @@ export interface SitePlugin {
   filterAvailable(products: unknown[]): unknown[];
   diff(oldProducts: unknown[], newProducts: unknown[]): PluginDiff;
   formatBaselineMessage(available: unknown[]): string;
+  /** Render history entries as text for LLM prediction. Optional. */
+  formatHistoryForPrediction?(history: HistoryEntry[]): string;
 }
