@@ -416,5 +416,5 @@ function chunkSummaryForAlerts(summary: string, maxChunkLen = 900, maxAlerts = 1
 
   return chunks.length === 1
     ? chunks
-    : chunks.map((c, i) => `Part ${i + 1}/${chunks.length}: ${c}`);
+    : chunks.map((c, i) => `Part ${i + 1}/${chunks.length}:\n${c}`);
 }
