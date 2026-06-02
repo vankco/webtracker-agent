@@ -55,6 +55,7 @@ const MAX_ERRORS = 20;
 export class MonitorController {
   private intervalHandle: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  private shuttingDown = false;
   private lastCheck: string | undefined;
   private lastResult: LastCheckResult | undefined;
   private nextCheck: string | undefined;
@@ -106,6 +107,7 @@ export class MonitorController {
     }
 
     this.running = true;
+    this.shuttingDown = false;
     const config = configStore.get();
     log('info', 'monitor', 'Monitor started', { url: config.target.url, intervalMs: config.schedule.intervalMs });
 
@@ -114,7 +116,9 @@ export class MonitorController {
       await this.runCheck(config);
     } catch (err) {
       this.recordError(err);
-      log('error', 'monitor', 'Initial check failed', { error: err instanceof Error ? err.message : String(err) });
+      if (!this.shuttingDown) {
+        log('error', 'monitor', 'Initial check failed', { error: err instanceof Error ? err.message : String(err) });
+      }
     }
 
     if (config.schedule.runOnce) {
@@ -140,6 +144,7 @@ export class MonitorController {
 
   /** Stop the monitor loop and close the browser session. */
   async stop(): Promise<void> {
+    this.shuttingDown = true;
     if (this.intervalHandle != null) {
       clearInterval(this.intervalHandle);
       this.intervalHandle = null;
@@ -378,6 +383,14 @@ export class MonitorController {
 
   private recordError(err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
+
+    // A check interrupted by a deliberate shutdown isn't a real failure —
+    // log it quietly (info) so it doesn't fire a Discord error alert.
+    if (this.shuttingDown) {
+      log('info', 'monitor', `Check interrupted during shutdown: ${message}`);
+      return;
+    }
+
     this.recentErrors.push({ timestamp: new Date().toISOString(), message });
     if (this.recentErrors.length > MAX_ERRORS) {
       this.recentErrors.shift();

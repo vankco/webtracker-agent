@@ -20,6 +20,7 @@ import type { MonitorDependencies } from '../monitor-controller.js';
 import type { AnalysisResult } from '../analyzer.js';
 import { PluginRegistry } from '../plugin-registry.js';
 import hermesPlugin from '@webtracker/plugin-hermes';
+import { setAlertCallback } from '../logger.js';
 
 // ---------------------------------------------------------------------------
 // Mock factories
@@ -414,5 +415,51 @@ describe('E2E: Hermès deterministic change detection', () => {
     const statusRes = await request(app).get('/api/monitor/status');
     expect(statusRes.body.data.lastResult.changed).toBe(true);
     expect(statusRes.body.data.lastResult.provider).toBe('deterministic');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 11. Shutdown suppresses scrape-error alerts
+// ---------------------------------------------------------------------------
+describe('E2E: shutdown suppresses error alerts', () => {
+  it('does not fire an error alert when a scrape is interrupted by stop()', async () => {
+    const configStore = new ConfigStore(makeFullConfig());
+    configStore.update({ schedule: { ...configStore.get().schedule, runOnce: true } });
+    const { deps } = makeDeps();
+
+    let rejectScrape: (e: Error) => void = () => {};
+    deps.scrapePageText = vi.fn().mockReturnValue(
+      new Promise<string>((_, reject) => { rejectScrape = reject; })
+    );
+
+    const errorAlerts: string[] = [];
+    setAlertCallback((entry) => { if (entry.level === 'error') errorAlerts.push(entry.message); });
+
+    const controller = new MonitorController(deps);
+    const startPromise = controller.start(configStore); // awaits the hanging scrape
+
+    await new Promise((r) => setTimeout(r, 20));
+    await controller.stop();                            // shuttingDown = true
+    rejectScrape(new Error('browser killed during shutdown'));
+    await startPromise;
+
+    setAlertCallback(null);
+    expect(errorAlerts).toHaveLength(0);
+  });
+
+  it('still fires an error alert for a normal scrape failure', async () => {
+    const configStore = new ConfigStore(makeFullConfig());
+    configStore.update({ schedule: { ...configStore.get().schedule, runOnce: true } });
+    const { deps } = makeDeps();
+    deps.scrapePageText = vi.fn().mockRejectedValue(new Error('network down'));
+
+    const errorAlerts: string[] = [];
+    setAlertCallback((entry) => { if (entry.level === 'error') errorAlerts.push(entry.message); });
+
+    const controller = new MonitorController(deps);
+    await controller.start(configStore);
+
+    setAlertCallback(null);
+    expect(errorAlerts.some((m) => m.includes('network down'))).toBe(true);
   });
 });
