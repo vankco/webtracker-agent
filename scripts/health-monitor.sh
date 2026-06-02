@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # health-monitor.sh
-# Checks the WebTracker Agent debug log for product count flapping and sends
-# a Discord alert if detected. Runs every 5 minutes via cron.
+# Runs every 5 minutes via cron. Two checks:
+#   1. Liveness — alert if the app is down (and again when it recovers).
+#   2. Flapping — alert if availableProducts bounces across scrapes (≤1/hour).
 #
 # Note: warn/error alerts are handled in real-time by the app itself (logger.ts).
-# This script only covers flapping which requires looking back across cycles.
 #
-# State: /tmp/webtracker-health-state.json
+# State: /tmp/webtracker-health-state.json  { lastFlapAlert, appDown }
 
 set -euo pipefail
 
 API_URL="http://localhost:3001/api/logs"
+HEALTH_URL="http://localhost:3001/api/config"
 STATE_FILE="/tmp/webtracker-health-state.json"
 CONFIG_FILE="$(cd "$(dirname "$0")/.." && pwd)/config.json"
 FLAP_CHECK_INTERVAL=3600  # alert at most once per hour
@@ -22,18 +23,50 @@ if [ -z "$DISCORD_WEBHOOK" ]; then
   exit 0
 fi
 
-if ! curl -sf "$API_URL" > /dev/null 2>&1; then
-  echo "[health-monitor] App not running — skipping check."
+# ---------------------------------------------------------------------------
+# Load prior state
+# ---------------------------------------------------------------------------
+LAST_FLAP_ALERT=0
+APP_DOWN=0
+if [ -f "$STATE_FILE" ]; then
+  LAST_FLAP_ALERT=$(python3 -c "import json; print(json.load(open('$STATE_FILE')).get('lastFlapAlert', 0))" 2>/dev/null || echo 0)
+  APP_DOWN=$(python3 -c "import json; print(int(json.load(open('$STATE_FILE')).get('appDown', False)))" 2>/dev/null || echo 0)
+fi
+
+notify() {
+  curl -s -X POST "$DISCORD_WEBHOOK" -H "Content-Type: application/json" \
+    -d "{\"content\": \"$1\"}" > /dev/null 2>&1 || true
+}
+
+write_state() {
+  python3 -c "import json; json.dump({'lastFlapAlert': $1, 'appDown': bool($2)}, open('$STATE_FILE','w'))"
+}
+
+# ---------------------------------------------------------------------------
+# 1. Liveness check
+# ---------------------------------------------------------------------------
+if ! curl -sf "$HEALTH_URL" > /dev/null 2>&1; then
+  if [ "$APP_DOWN" -eq 0 ]; then
+    notify "🛑 **WebTracker is DOWN** — the app is not responding on :3001 (checked $(date '+%H:%M %Z')). Monitoring is paused until it restarts."
+    echo "[health-monitor] App down — alert sent."
+  else
+    echo "[health-monitor] App still down — already alerted."
+  fi
+  write_state "$LAST_FLAP_ALERT" 1
   exit 0
 fi
 
-LAST_FLAP_ALERT=0
-if [ -f "$STATE_FILE" ]; then
-  LAST_FLAP_ALERT=$(python3 -c "import json; print(json.load(open('$STATE_FILE')).get('lastFlapAlert', 0))")
+# App is up — if it was previously down, announce recovery
+if [ "$APP_DOWN" -eq 1 ]; then
+  notify "✅ **WebTracker is back UP** — responding again on :3001 (at $(date '+%H:%M %Z'))."
+  echo "[health-monitor] App recovered — alert sent."
 fi
 
 NOW=$(date +%s)
 
+# ---------------------------------------------------------------------------
+# 2. Flapping check
+# ---------------------------------------------------------------------------
 python3 << PYEOF
 import json, urllib.request, sys
 
@@ -58,6 +91,7 @@ try:
         logs = json.loads(resp.read())["data"]
 except Exception as e:
     print(f"[health-monitor] Could not fetch logs: {e}")
+    json.dump({"lastFlapAlert": last_flap_alert, "appDown": False}, open(state_file, "w"))
     sys.exit(0)
 
 if (now - last_flap_alert) >= flap_interval:
@@ -69,10 +103,7 @@ if (now - last_flap_alert) >= flap_interval:
     if len(fetch_entries) >= 3:
         counts = [l["details"]["availableProducts"] for l in fetch_entries[:6]]
         if len(set(counts)) > 1:
-            msg = (f"🔄 **WebTracker Flapping Detected** — "
-                   f"availableProducts varies across recent scrapes: {counts}. "
-                   f"Possible lazy-load timing issue.")
-            notify(msg.replace('"', '\\"'))
+            notify(f"🔄 **WebTracker Flapping Detected** — availableProducts varies across recent scrapes: {counts}. Possible lazy-load timing issue.".replace('"', '\\"'))
             last_flap_alert = now
             print(f"[health-monitor] Flapping alert sent — counts: {counts}")
         else:
@@ -82,6 +113,5 @@ if (now - last_flap_alert) >= flap_interval:
 else:
     print(f"[health-monitor] Flap check skipped — last alert was {now - last_flap_alert}s ago")
 
-with open(state_file, "w") as f:
-    json.dump({"lastFlapAlert": last_flap_alert}, f)
+json.dump({"lastFlapAlert": last_flap_alert, "appDown": False}, open(state_file, "w"))
 PYEOF
