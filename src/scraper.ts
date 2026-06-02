@@ -2,7 +2,8 @@ import { chromium } from 'playwright-extra';
 import type { BrowserContext, Page } from 'playwright';
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
+import { rmSync } from 'node:fs';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import type { BrowserConfig } from './config.js';
 import type { SitePlugin } from './plugin-types.js';
@@ -58,6 +59,18 @@ async function getOrCreateSessionPage(
     process.cwd(),
     userDataDirOverride || process.env['BROWSER_USER_DATA_DIR'] || '.browser-profile'
   );
+
+  // Remove stale Chrome singleton locks left behind by a previous process that
+  // didn't shut down cleanly (e.g. crash or tsx --watch restart). Without this,
+  // launchPersistentContext fails with "Failed to create a ProcessSingleton".
+  for (const lock of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+    try {
+      rmSync(join(userDataDir, lock), { force: true });
+    } catch {
+      // Non-fatal — if removal fails, the launch below will surface the error.
+    }
+  }
+
   persistentContext = await chromium.launchPersistentContext(userDataDir, {
     channel: 'chrome',
     headless,
