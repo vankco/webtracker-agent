@@ -13,6 +13,7 @@ AI-powered website change monitor. Watches a page for meaningful changes and sen
 3. A Discord alert is sent with the result
 4. If all LLM providers fail, a local text-diff fallback is used (generic sites only)
 5. On first run with no prior state, plugins send a baseline alert listing all currently tracked items
+6. For plugin URLs, each change event is appended to a time-series `history` in `state.json` (capped at 500 events) — this builds the dataset used for trend analysis and predictions
 
 ---
 

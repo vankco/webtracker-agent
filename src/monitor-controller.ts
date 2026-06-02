@@ -8,7 +8,7 @@ import { scrapePageText, closeScraperSession } from './scraper.js';
 import type { SitePlugin } from './plugin-types.js';
 import { PluginRegistry } from './plugin-registry.js';
 import { sendDiscordAlert } from './notifier.js';
-import { loadState, saveState } from './state.js';
+import { loadState, saveState, appendHistory, type HistoryEntry } from './state.js';
 import { analyzeWithProviders, type AnalysisResultWithMeta } from './llm.js';
 import {
   getEnabledProvidersByPriority,
@@ -224,6 +224,16 @@ export class MonitorController {
         lastContent: currentContent,
         lastChecked: new Date().toISOString(),
         ...(plugin ? { lastProducts: currentProducts! } : {}),
+        ...(plugin
+          ? {
+              history: appendHistory(undefined, {
+                timestamp: new Date().toISOString(),
+                products: currentAvailable,
+                availableCount: currentAvailable.length,
+                changeSummary: 'baseline',
+              }),
+            }
+          : {}),
       });
       this.lastCheck = new Date().toISOString();
       return;
@@ -241,11 +251,13 @@ export class MonitorController {
     const previousTrackable = plugin ? plugin.productsToText(previousAvailable) : previousState.lastContent;
 
     if (currentTrackable === previousTrackable) {
+      // No change — carry history forward unchanged (don't append a new event)
       this.deps.saveState({
         url: target.url,
         lastContent: currentContent,
         lastChecked: new Date().toISOString(),
         ...(plugin ? { lastProducts: currentProducts! } : {}),
+        ...(previousState.history ? { history: previousState.history } : {}),
       });
       this.lastCheck = new Date().toISOString();
       this.lastResult = {
@@ -290,11 +302,18 @@ export class MonitorController {
         log('info', 'monitor', `${chunks.length} alert(s) sent`, { summary: finalSummary });
       }
 
+      const historyEntry: HistoryEntry = {
+        timestamp: new Date().toISOString(),
+        products: currentAvailable,
+        availableCount: currentAvailable.length,
+        changeSummary: pluginDiff.summary,
+      };
       this.deps.saveState({
         url: target.url,
         lastContent: currentContent,
         lastChecked: new Date().toISOString(),
         lastProducts: currentProducts!,
+        history: appendHistory(previousState.history, historyEntry),
       });
       return;
     }
