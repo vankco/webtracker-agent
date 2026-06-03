@@ -28,6 +28,14 @@ function parseIntEnv(value: string | undefined, defaultValue: number): number {
 }
 
 async function navigateWithFallback(page: Page, url: string, timeoutMs: number): Promise<void> {
+  // Reset to about:blank first so the next goto is always a *real* navigation.
+  // Without this, navigating to a URL that differs only by its hash fragment
+  // (e.g. Hermès' "…/#|") is treated as a no-op and the SPA serves stale,
+  // first-load inventory forever in a persistent session.
+  await page.goto('about:blank').catch(() => {
+    // Non-fatal — fall through to the real navigation.
+  });
+
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
   } catch {
