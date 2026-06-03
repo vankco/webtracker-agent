@@ -92,7 +92,17 @@ npm start
 
 - API runs on `http://localhost:3001`
 - UI runs on `http://localhost:5173`
+- A standalone health-monitor process also starts (see below)
 - If `config.json` is fully configured, the monitor starts automatically
+
+### Health monitor
+
+`npm start` also launches `src/health-monitor.ts` as a **separate process** (run it alone with `npm run monitor`). Because it runs independently of the agent, it can detect when the agent itself goes down. Every 5 minutes it sends Discord alerts for:
+
+- **Liveness** — the agent is down (once) and when it recovers (once)
+- **Flapping** — `availableProducts` bouncing across recent scrapes (at most once per hour)
+
+Real-time `warn`/`error` alerts are handled by the agent itself; the health monitor covers the cases the agent can't report on its own.
 
 ### API only
 
