@@ -2,6 +2,7 @@ node_modules/
 dist/
 .env
 state.json
+logs.jsonl
 .browser-profile/
 config.json
 coverage/

@@ -22,6 +22,8 @@ import { MonitorController } from './monitor-controller.js';
 import { getLogs, clearLogs } from './logger.js';
 import { defaultLlmAnalyzer } from './llm.js';
 import { scrapePageText } from './scraper.js';
+import { loadState } from './state.js';
+import { predictAvailability } from './predictor.js';
 import type {
   ApiSuccessResponse,
   ApiErrorResponse,
@@ -46,6 +48,7 @@ type ErrorCode =
   | 'PROVIDER_NOT_FOUND'
   | 'TEST_FAILED'
   | 'SCRAPE_FAILED'
+  | 'PREDICTION_FAILED'
   | 'INTERNAL_ERROR';
 
 function ok<T>(res: Response, data: T, status = 200): void {
@@ -140,7 +143,8 @@ async function warmModelCache(config: AppConfig): Promise<void> {
 export function createApiRouter(
   configStore: ConfigStore,
   monitorController: MonitorController,
-  persistConfig: (config: AppConfig) => void = saveJsonConfig
+  persistConfig: (config: AppConfig) => void = saveJsonConfig,
+  predictor: typeof predictAvailability = predictAvailability
 ): express.Router {
   const router = express.Router();
 
@@ -427,6 +431,48 @@ export function createApiRouter(
     }
   });
 
+  // -------------------------------------------------------------------------
+  // POST /api/predict
+  // -------------------------------------------------------------------------
+  router.post('/predict', async (_req: Request, res: Response) => {
+    const config = configStore.get();
+    const url = config.target.url;
+
+    if (!url) {
+      return fail(res, 'PREDICTION_FAILED', 'No target URL configured.', 422);
+    }
+
+    const plugin = monitorController.findPlugin(url);
+    if (!plugin || !plugin.formatHistoryForPrediction) {
+      return fail(res, 'PREDICTION_FAILED', 'No prediction-capable plugin matches the target URL.', 422);
+    }
+
+    const state = loadState();
+    const history = state?.history ?? [];
+    if (history.length < 3) {
+      return fail(
+        res,
+        'PREDICTION_FAILED',
+        `Not enough history yet to predict (have ${history.length}, need at least 3 change events).`,
+        422
+      );
+    }
+
+    const providers = getEnabledProvidersByPriority(config);
+    if (providers.length === 0) {
+      return fail(res, 'PREDICTION_FAILED', 'No LLM providers enabled.', 422);
+    }
+
+    try {
+      const historyText = plugin.formatHistoryForPrediction(history);
+      const result = await predictor(url, historyText, providers, history.length);
+      ok(res, result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      fail(res, 'PREDICTION_FAILED', message, 502);
+    }
+  });
+
   return router;
 }
 
@@ -437,7 +483,8 @@ export function createApiRouter(
 export function createApiApp(
   configStore: ConfigStore,
   monitorController: MonitorController,
-  persistConfig: (config: AppConfig) => void = saveJsonConfig
+  persistConfig: (config: AppConfig) => void = saveJsonConfig,
+  predictor: typeof predictAvailability = predictAvailability
 ): express.Application {
   const app = express();
 
@@ -448,7 +495,7 @@ export function createApiApp(
   void warmModelCache(configStore.get());
 
   // Mount all routes under /api
-  app.use('/api', createApiRouter(configStore, monitorController, persistConfig));
+  app.use('/api', createApiRouter(configStore, monitorController, persistConfig, predictor));
 
   // 404 handler for unmatched /api routes
   app.use('/api', (_req: Request, res: Response) => {

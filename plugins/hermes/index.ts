@@ -9,6 +9,13 @@ interface PluginDiff {
   requestLlmFallback?: boolean;
 }
 
+interface HistoryEntry {
+  timestamp: string;
+  products: unknown[];
+  availableCount: number;
+  changeSummary: string;
+}
+
 interface SitePlugin {
   name: string;
   matches(url: string): boolean;
@@ -18,6 +25,7 @@ interface SitePlugin {
   filterAvailable(products: unknown[]): unknown[];
   diff(oldProducts: unknown[], newProducts: unknown[]): PluginDiff;
   formatBaselineMessage(available: unknown[]): string;
+  formatHistoryForPrediction?(history: HistoryEntry[]): string;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +71,10 @@ export function isHermesUrl(url: string): boolean {
 }
 
 export async function extractHermesProducts(page: Page): Promise<HermesProduct[]> {
+  // Wait for at least one product to appear, then allow lazy-loaded items to settle
+  await page.waitForSelector('div.product-item', { timeout: 10_000 }).catch(() => {});
+  await page.waitForTimeout(2000);
+
   return page.evaluate(() => {
     return Array.from(document.querySelectorAll('div.product-item')).map((item) => {
       const linkEl = item.querySelector('a.product-item-name');
@@ -149,6 +161,18 @@ export function formatHermesDiscordMessage(diff: HermesDiff, totalCount: number)
   return `${sections.join('\n\n')}\n\n📊 ${totalCount} available total`;
 }
 
+export function formatHermesHistory(history: HistoryEntry[]): string {
+  return history
+    .map((entry) => {
+      const products = (entry.products as HermesProduct[]) ?? [];
+      const items = products
+        .map((p) => `    - ${p.name} (${p.color || 'n/a'}) ${p.price} [${p.sku}]`)
+        .join('\n');
+      return `[${entry.timestamp}] ${entry.availableCount} available — ${entry.changeSummary}\n${items}`;
+    })
+    .join('\n\n');
+}
+
 export function formatHermesBaselineMessage(available: HermesProduct[]): string {
   if (available.length === 0) {
     return `🟡 **Hermès baseline saved — no products currently available.**`;
@@ -189,6 +213,10 @@ const hermesPlugin: SitePlugin = {
 
   formatBaselineMessage(available: unknown[]): string {
     return formatHermesBaselineMessage(toTyped(available));
+  },
+
+  formatHistoryForPrediction(history: HistoryEntry[]): string {
+    return formatHermesHistory(history);
   },
 };
 

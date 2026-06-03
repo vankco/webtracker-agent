@@ -2,7 +2,8 @@ import { chromium } from 'playwright-extra';
 import type { BrowserContext, Page } from 'playwright';
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
+import { rmSync } from 'node:fs';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import type { BrowserConfig } from './config.js';
 import type { SitePlugin } from './plugin-types.js';
@@ -27,6 +28,14 @@ function parseIntEnv(value: string | undefined, defaultValue: number): number {
 }
 
 async function navigateWithFallback(page: Page, url: string, timeoutMs: number): Promise<void> {
+  // Reset to about:blank first so the next goto is always a *real* navigation.
+  // Without this, navigating to a URL that differs only by its hash fragment
+  // (e.g. Hermès' "…/#|") is treated as a no-op and the SPA serves stale,
+  // first-load inventory forever in a persistent session.
+  await page.goto('about:blank').catch(() => {
+    // Non-fatal — fall through to the real navigation.
+  });
+
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
   } catch {
@@ -58,6 +67,18 @@ async function getOrCreateSessionPage(
     process.cwd(),
     userDataDirOverride || process.env['BROWSER_USER_DATA_DIR'] || '.browser-profile'
   );
+
+  // Remove stale Chrome singleton locks left behind by a previous process that
+  // didn't shut down cleanly (e.g. crash or tsx --watch restart). Without this,
+  // launchPersistentContext fails with "Failed to create a ProcessSingleton".
+  for (const lock of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+    try {
+      rmSync(join(userDataDir, lock), { force: true });
+    } catch {
+      // Non-fatal — if removal fails, the launch below will surface the error.
+    }
+  }
+
   persistentContext = await chromium.launchPersistentContext(userDataDir, {
     channel: 'chrome',
     headless,

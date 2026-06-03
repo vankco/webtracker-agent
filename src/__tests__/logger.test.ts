@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { log, getLogs, clearLogs } from '../logger.js';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { log, getLogs, clearLogs, setAlertCallback } from '../logger.js';
 
 describe('logger', () => {
   beforeEach(() => {
@@ -40,5 +40,35 @@ describe('logger', () => {
     log('info', 'monitor', 'test');
     clearLogs();
     expect(getLogs()).toHaveLength(0);
+  });
+});
+
+describe('setAlertCallback', () => {
+  beforeEach(() => {
+    clearLogs();
+    setAlertCallback(null);
+  });
+
+  it('calls the callback on warn entries', () => {
+    const cb = vi.fn();
+    setAlertCallback(cb);
+    log('warn', 'monitor', 'something wrong');
+    expect(cb).toHaveBeenCalledOnce();
+    expect(cb.mock.calls[0][0].level).toBe('warn');
+  });
+
+  it('calls the callback on error entries', () => {
+    const cb = vi.fn();
+    setAlertCallback(cb);
+    log('error', 'scrape', 'failed');
+    expect(cb).toHaveBeenCalledOnce();
+    expect(cb.mock.calls[0][0].level).toBe('error');
+  });
+
+  it('does not call the callback on info entries', () => {
+    const cb = vi.fn();
+    setAlertCallback(cb);
+    log('info', 'monitor', 'all good');
+    expect(cb).not.toHaveBeenCalled();
   });
 });

@@ -13,6 +13,7 @@ AI-powered website change monitor. Watches a page for meaningful changes and sen
 3. A Discord alert is sent with the result
 4. If all LLM providers fail, a local text-diff fallback is used (generic sites only)
 5. On first run with no prior state, plugins send a baseline alert listing all currently tracked items
+6. For plugin URLs, each change event is appended to a time-series `history` in `state.json` (capped at 500 events) — this builds the dataset used for trend analysis and predictions
 
 ---
 
@@ -91,7 +92,17 @@ npm start
 
 - API runs on `http://localhost:3001`
 - UI runs on `http://localhost:5173`
+- A standalone health-monitor process also starts (see below)
 - If `config.json` is fully configured, the monitor starts automatically
+
+### Health monitor
+
+`npm start` also launches `src/health-monitor.ts` as a **separate process** (run it alone with `npm run monitor`). Because it runs independently of the agent, it can detect when the agent itself goes down. Every 5 minutes it sends Discord alerts for:
+
+- **Liveness** — the agent is down (once) and when it recovers (once)
+- **Flapping** — `availableProducts` bouncing across recent scrapes (at most once per hour)
+
+Real-time `warn`/`error` alerts are handled by the agent itself; the health monitor covers the cases the agent can't report on its own.
 
 ### API only
 
@@ -115,6 +126,8 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 ### Debug Log page
 
 - **Live event log** — every scrape, LLM call, alert, and error is recorded with a timestamp and log level
+- **Persistent across restarts** — logs are written to `logs.jsonl` and reloaded on startup; up to 2 weeks of history is retained
+- **Real-time Discord alerts** — any `warn` or `error` entry immediately sends a Discord notification
 - **Filter by level** — filter to `info`, `warn`, or `error` events
 - **Auto-scroll** — newest events appear at the bottom; scrolls automatically unless you scroll up
 
@@ -124,6 +137,7 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 - **Last Check / Next Check** — when the last check ran and when the next is scheduled (Next Check only shown while running)
 - **Last Result** — the LLM's analysis from the most recent check, including provider, model, and latency
 - **Recent Fetched Content** — last 2 scraped snapshots with timestamp, character count, and first 500 chars preview
+- **Predictions** — for plugin URLs with collected history, click "Run Prediction" to have an LLM forecast likely restocks, sellouts, and price trends from the time-series data. Requires at least 3 recorded change events.
 - **Recent Errors** — scrape failures, empty content warnings, etc.
 - **Schedule Controls** — change the check interval or enable run-once mode without restarting
 - **Scrape Validator** — test a URL + CSS selector before starting the monitor; shows a content preview and character count

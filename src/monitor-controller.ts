@@ -8,7 +8,7 @@ import { scrapePageText, closeScraperSession } from './scraper.js';
 import type { SitePlugin } from './plugin-types.js';
 import { PluginRegistry } from './plugin-registry.js';
 import { sendDiscordAlert } from './notifier.js';
-import { loadState, saveState } from './state.js';
+import { loadState, saveState, appendHistory, type HistoryEntry } from './state.js';
 import { analyzeWithProviders, type AnalysisResultWithMeta } from './llm.js';
 import {
   getEnabledProvidersByPriority,
@@ -55,6 +55,7 @@ const MAX_ERRORS = 20;
 export class MonitorController {
   private intervalHandle: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  private shuttingDown = false;
   private lastCheck: string | undefined;
   private lastResult: LastCheckResult | undefined;
   private nextCheck: string | undefined;
@@ -74,6 +75,11 @@ export class MonitorController {
 
   isRunning(): boolean {
     return this.running;
+  }
+
+  /** Resolve the site plugin matching a URL, if any. */
+  findPlugin(url: string): SitePlugin | null {
+    return this.registry.findForUrl(url);
   }
 
   getStatus(configStore: ConfigStore): MonitorStatus {
@@ -101,6 +107,7 @@ export class MonitorController {
     }
 
     this.running = true;
+    this.shuttingDown = false;
     const config = configStore.get();
     log('info', 'monitor', 'Monitor started', { url: config.target.url, intervalMs: config.schedule.intervalMs });
 
@@ -109,7 +116,9 @@ export class MonitorController {
       await this.runCheck(config);
     } catch (err) {
       this.recordError(err);
-      log('error', 'monitor', 'Initial check failed', { error: err instanceof Error ? err.message : String(err) });
+      if (!this.shuttingDown) {
+        log('error', 'monitor', 'Initial check failed', { error: err instanceof Error ? err.message : String(err) });
+      }
     }
 
     if (config.schedule.runOnce) {
@@ -135,6 +144,7 @@ export class MonitorController {
 
   /** Stop the monitor loop and close the browser session. */
   async stop(): Promise<void> {
+    this.shuttingDown = true;
     if (this.intervalHandle != null) {
       clearInterval(this.intervalHandle);
       this.intervalHandle = null;
@@ -224,6 +234,16 @@ export class MonitorController {
         lastContent: currentContent,
         lastChecked: new Date().toISOString(),
         ...(plugin ? { lastProducts: currentProducts! } : {}),
+        ...(plugin
+          ? {
+              history: appendHistory(undefined, {
+                timestamp: new Date().toISOString(),
+                products: currentAvailable,
+                availableCount: currentAvailable.length,
+                changeSummary: 'baseline',
+              }),
+            }
+          : {}),
       });
       this.lastCheck = new Date().toISOString();
       return;
@@ -241,11 +261,13 @@ export class MonitorController {
     const previousTrackable = plugin ? plugin.productsToText(previousAvailable) : previousState.lastContent;
 
     if (currentTrackable === previousTrackable) {
+      // No change — carry history forward unchanged (don't append a new event)
       this.deps.saveState({
         url: target.url,
         lastContent: currentContent,
         lastChecked: new Date().toISOString(),
         ...(plugin ? { lastProducts: currentProducts! } : {}),
+        ...(previousState.history ? { history: previousState.history } : {}),
       });
       this.lastCheck = new Date().toISOString();
       this.lastResult = {
@@ -290,11 +312,18 @@ export class MonitorController {
         log('info', 'monitor', `${chunks.length} alert(s) sent`, { summary: finalSummary });
       }
 
+      const historyEntry: HistoryEntry = {
+        timestamp: new Date().toISOString(),
+        products: currentAvailable,
+        availableCount: currentAvailable.length,
+        changeSummary: pluginDiff.summary,
+      };
       this.deps.saveState({
         url: target.url,
         lastContent: currentContent,
         lastChecked: new Date().toISOString(),
         lastProducts: currentProducts!,
+        history: appendHistory(previousState.history, historyEntry),
       });
       return;
     }
@@ -354,6 +383,14 @@ export class MonitorController {
 
   private recordError(err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
+
+    // A check interrupted by a deliberate shutdown isn't a real failure —
+    // log it quietly (info) so it doesn't fire a Discord error alert.
+    if (this.shuttingDown) {
+      log('info', 'monitor', `Check interrupted during shutdown: ${message}`);
+      return;
+    }
+
     this.recentErrors.push({ timestamp: new Date().toISOString(), message });
     if (this.recentErrors.length > MAX_ERRORS) {
       this.recentErrors.shift();
@@ -392,5 +429,5 @@ function chunkSummaryForAlerts(summary: string, maxChunkLen = 900, maxAlerts = 1
 
   return chunks.length === 1
     ? chunks
-    : chunks.map((c, i) => `Part ${i + 1}/${chunks.length}: ${c}`);
+    : chunks.map((c, i) => `Part ${i + 1}/${chunks.length}:\n${c}`);
 }
