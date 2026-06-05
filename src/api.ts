@@ -193,6 +193,9 @@ export function createApiRouter(
       if (typeof body.notifications.discordWebhookUrl === 'string') {
         n.discordWebhookUrl = body.notifications.discordWebhookUrl;
       }
+      if (typeof body.notifications.discordSystemWebhookUrl === 'string') {
+        n.discordSystemWebhookUrl = body.notifications.discordSystemWebhookUrl;
+      }
       update.notifications = n;
     }
 

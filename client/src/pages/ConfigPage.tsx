@@ -82,6 +82,8 @@ interface Draft {
   runOnce: boolean;
   webhookNew: string;
   showWebhookEdit: boolean;
+  systemWebhookNew: string;
+  showSystemWebhookEdit: boolean;
 }
 
 function toDraft(config: SafeAppConfig): Draft {
@@ -92,6 +94,8 @@ function toDraft(config: SafeAppConfig): Draft {
     runOnce: config.schedule.runOnce,
     webhookNew: '',
     showWebhookEdit: false,
+    systemWebhookNew: '',
+    showSystemWebhookEdit: false,
   };
 }
 
@@ -102,7 +106,8 @@ function isDirty(draft: Draft, saved: SafeAppConfig): boolean {
     draft.targetSelector !== saved.target.selector ||
     intervalMs !== saved.schedule.intervalMs ||
     draft.runOnce !== saved.schedule.runOnce ||
-    draft.webhookNew.trim() !== ''
+    draft.webhookNew.trim() !== '' ||
+    draft.systemWebhookNew.trim() !== ''
   );
 }
 
@@ -151,8 +156,10 @@ export function ConfigPage() {
         target: { url: draft.targetUrl.trim(), selector: draft.targetSelector.trim() },
         schedule: { intervalMs, runOnce: draft.runOnce },
       };
-      if (draft.webhookNew.trim()) {
-        body.notifications = { discordWebhookUrl: draft.webhookNew.trim() };
+      if (draft.webhookNew.trim() || draft.systemWebhookNew.trim()) {
+        body.notifications = {};
+        if (draft.webhookNew.trim()) body.notifications.discordWebhookUrl = draft.webhookNew.trim();
+        if (draft.systemWebhookNew.trim()) body.notifications.discordSystemWebhookUrl = draft.systemWebhookNew.trim();
       }
       const updated = await api.config.update(body);
       setSaved(updated);
@@ -191,6 +198,7 @@ export function ConfigPage() {
 
   const dirty = isDirty(draft, saved);
   const webhookConfigured = Boolean(saved.notifications.discordWebhookUrl);
+  const systemWebhookConfigured = Boolean(saved.notifications.discordSystemWebhookUrl);
 
   return (
     <div className={styles.root}>
@@ -336,6 +344,60 @@ export function ConfigPage() {
                   onClick={() => {
                     setField('webhookNew', '');
                     setField('showWebhookEdit', false);
+                  }}
+                >
+                  Cancel change
+                </Button>
+                <Text className={styles.hintText}>
+                  Write-only — the value is never echoed back to the UI.
+                </Text>
+              </div>
+            )}
+
+            <Caption1 style={{ color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalS }}>
+              System / Debug Webhook URL
+            </Caption1>
+            <Text className={styles.hintText}>
+              Health monitor and warn/error alerts. Falls back to the main webhook if not set.
+            </Text>
+
+            {!draft.showSystemWebhookEdit ? (
+              <div className={styles.webhookRow}>
+                <Input
+                  value={
+                    systemWebhookConfigured
+                      ? '••••••••' + saved.notifications.discordSystemWebhookUrl.slice(-8)
+                      : '(not configured — using main webhook)'
+                  }
+                  readOnly
+                  style={{ flex: 1, fontFamily: 'monospace' }}
+                />
+                <Button
+                  icon={<EditRegular />}
+                  appearance="outline"
+                  size="small"
+                  onClick={() => setField('showSystemWebhookEdit', true)}
+                >
+                  {systemWebhookConfigured ? 'Change' : 'Set'}
+                </Button>
+              </div>
+            ) : (
+              <div className={styles.fieldGroup}>
+                <Input
+                  type="url"
+                  value={draft.systemWebhookNew}
+                  onChange={(e) => setField('systemWebhookNew', e.target.value)}
+                  placeholder="https://discord.com/api/webhooks/…"
+                  style={{ fontFamily: 'monospace' }}
+                  autoFocus
+                />
+                <Button
+                  icon={<DismissRegular />}
+                  appearance="subtle"
+                  size="small"
+                  onClick={() => {
+                    setField('systemWebhookNew', '');
+                    setField('showSystemWebhookEdit', false);
                   }}
                 >
                   Cancel change

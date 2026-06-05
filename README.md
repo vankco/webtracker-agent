@@ -175,6 +175,7 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 | `browser.persistSession` | `true` | Reuse cookies/login state between runs |
 | `browser.userDataDir` | `.browser-profile` | Where browser session data is stored |
 | `plugins` | `[]` | List of site plugin package names to load |
+| `discordSystemWebhookUrl` | — | Webhook for system/debug alerts: health monitor (liveness, flapping) and warn/error log entries. Falls back to `discordWebhookUrl` if not set. |
 
 ---
 

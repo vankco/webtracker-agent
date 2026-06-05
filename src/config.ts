@@ -37,6 +37,7 @@ export interface BrowserConfig {
 
 export interface NotificationsConfig {
   discordWebhookUrl: string;
+  discordSystemWebhookUrl: string;
 }
 
 export interface AppConfig {
@@ -232,6 +233,9 @@ export interface JsonConfig {
   apiPort?: number;
   plugins?: string[];
 
+  // System/debug channel — health monitor and warn/error log alerts go here.
+  // Falls back to discordWebhookUrl if not set.
+  discordSystemWebhookUrl?: string;
   llm?: {
     gemini?: {
       enabled?: boolean;
@@ -296,6 +300,7 @@ function jsonToEnv(json: JsonConfig, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv
   if (json.discordWebhookUrl !== undefined) env['DISCORD_WEBHOOK_URL']     = json.discordWebhookUrl;
   if (json.apiPort !== undefined)           env['API_PORT']                = String(json.apiPort);
   if (json.plugins !== undefined)           env['PLUGINS']                 = json.plugins.join(',');
+  if (json.discordSystemWebhookUrl !== undefined) env['DISCORD_SYSTEM_WEBHOOK_URL'] = json.discordSystemWebhookUrl;
 
   const g = json.llm?.gemini;
   if (g) {
@@ -347,6 +352,7 @@ export function saveJsonConfig(config: AppConfig, filePath = resolveConfigPath()
     checkIntervalMs:    config.schedule.intervalMs,
     runOnce:            config.schedule.runOnce,
     discordWebhookUrl:  config.notifications.discordWebhookUrl,
+    discordSystemWebhookUrl: config.notifications.discordSystemWebhookUrl || undefined,
 
     llm: {
       gemini: gemini ? {
@@ -429,6 +435,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = resolveEnv()): AppConfig 
     },
     notifications: {
       discordWebhookUrl: requireEnv('DISCORD_WEBHOOK_URL', env),
+      discordSystemWebhookUrl: env['DISCORD_SYSTEM_WEBHOOK_URL'] ?? '',
     },
     llmProviders: parseProviderConfig(env),
     plugins: env['PLUGINS'] ? env['PLUGINS'].split(',').map(s => s.trim()).filter(Boolean) : [],
@@ -476,6 +483,7 @@ export function loadAppConfigLenient(env: NodeJS.ProcessEnv = resolveEnv()): App
     },
     notifications: {
       discordWebhookUrl: env['DISCORD_WEBHOOK_URL'] ?? '',
+      discordSystemWebhookUrl: env['DISCORD_SYSTEM_WEBHOOK_URL'] ?? '',
     },
     llmProviders: parseProviderConfig(env),
     plugins: env['PLUGINS'] ? env['PLUGINS'].split(',').map(s => s.trim()).filter(Boolean) : [],

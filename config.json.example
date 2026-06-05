@@ -4,6 +4,7 @@
   "checkIntervalMs": 300000,
   "runOnce": false,
   "discordWebhookUrl": "https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN",
+  "discordSystemWebhookUrl": "https://discord.com/api/webhooks/YOUR_SYSTEM_CHANNEL_ID/YOUR_TOKEN",
   "apiPort": 3001,
 
   "llm": {

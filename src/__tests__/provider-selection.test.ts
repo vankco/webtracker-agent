@@ -46,7 +46,7 @@ function makeConfig(providers: LlmProviderConfig[]): AppConfig {
       gotoTimeoutMs: 60_000,
       userDataDir: '.browser-profile',
     },
-    notifications: { discordWebhookUrl: 'https://discord.com/api/webhooks/test' },
+    notifications: { discordWebhookUrl: 'https://discord.com/api/webhooks/test', discordSystemWebhookUrl: '' },
     plugins: [],
     llmProviders: providers,
   };

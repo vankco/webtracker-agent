@@ -67,7 +67,8 @@ async function main(): Promise<void> {
 
     startApiServer(configStore, monitorController, apiPort);
     registerSignalHandlers(monitorController);
-    registerDiscordAlerts(initial.notifications.discordWebhookUrl);
+    const systemWebhook = initial.notifications.discordSystemWebhookUrl || initial.notifications.discordWebhookUrl;
+    registerDiscordAlerts(systemWebhook);
 
     // Auto-start the monitor if config is already valid (target URL + credentials set)
     const validationErrors = configStore.validate();
@@ -95,7 +96,8 @@ async function main(): Promise<void> {
     const monitorController = new MonitorController({}, registry);
 
     registerSignalHandlers(monitorController);
-    registerDiscordAlerts(config.notifications.discordWebhookUrl);
+    const cliSystemWebhook = config.notifications.discordSystemWebhookUrl || config.notifications.discordWebhookUrl;
+    registerDiscordAlerts(cliSystemWebhook);
     await monitorController.start(configStore);
   }
 }

@@ -16,7 +16,7 @@ import { resolveEnv } from './config.js';
 const env = resolveEnv();
 const PORT = env['API_PORT'] || '3001';
 const BASE = `http://localhost:${PORT}/api`;
-const WEBHOOK = env['DISCORD_WEBHOOK_URL'] ?? '';
+const WEBHOOK = env['DISCORD_SYSTEM_WEBHOOK_URL'] || env['DISCORD_WEBHOOK_URL'] || '';
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 const FLAP_COOLDOWN_MS = 60 * 60 * 1000; // alert on flapping at most once/hour

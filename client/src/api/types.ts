@@ -48,7 +48,7 @@ export interface SafeAppConfig {
     gotoTimeoutMs: number;
     userDataDir: string;
   };
-  notifications: { discordWebhookUrl: string };
+  notifications: { discordWebhookUrl: string; discordSystemWebhookUrl: string };
   llmProviders: SafeLlmProviderConfig[];
 }
 
@@ -59,7 +59,7 @@ export interface PutConfigRequest {
   target?: { url?: string; selector?: string };
   schedule?: { intervalMs?: number; runOnce?: boolean };
   browser?: Partial<SafeAppConfig['browser']>;
-  notifications?: { discordWebhookUrl?: string };
+  notifications?: { discordWebhookUrl?: string; discordSystemWebhookUrl?: string };
 }
 
 // ---------------------------------------------------------------------------

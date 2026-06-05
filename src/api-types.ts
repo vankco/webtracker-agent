@@ -61,6 +61,7 @@ export interface PutConfigRequest {
   browser?: Partial<BrowserConfig>;
   notifications?: {
     discordWebhookUrl?: string;
+    discordSystemWebhookUrl?: string;
   };
 }
 
