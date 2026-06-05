@@ -409,6 +409,51 @@ describe('POST /api/predict', () => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/ask
+// ---------------------------------------------------------------------------
+
+function makeAskApp(qaAnswerer = vi.fn().mockResolvedValue('Bag A is available.')) {
+  const configStore = new ConfigStore(makeFullConfig());
+  const monitorController = new MonitorController();
+  const app = createApiApp(configStore, monitorController, () => {}, undefined, qaAnswerer);
+  return { app, configStore, monitorController, qaAnswerer };
+}
+
+describe('POST /api/ask', () => {
+  it('returns 400 when question is missing', async () => {
+    const { app } = makeAskApp();
+    const res = await request(app).post('/api/ask').send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 422 when no target URL is configured', async () => {
+    const configStore = new ConfigStore({ ...makeFullConfig(), target: { url: '', selector: '' } });
+    const monitorController = new MonitorController();
+    const app = createApiApp(configStore, monitorController, () => {});
+    const res = await request(app).post('/api/ask').send({ question: 'what is in stock?' });
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('NOT_CONFIGURED');
+  });
+
+  it('returns 200 with answer on success', async () => {
+    const { app } = makeAskApp();
+    const res = await request(app).post('/api/ask').send({ question: 'what is in stock?' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.answer).toBe('Bag A is available.');
+  });
+
+  it('returns 502 when all providers fail', async () => {
+    const failing = vi.fn().mockRejectedValue(new Error('all providers failed'));
+    const { app } = makeAskApp(failing);
+    const res = await request(app).post('/api/ask').send({ question: 'what is in stock?' });
+    expect(res.status).toBe(502);
+    expect(res.body.error.code).toBe('INTERNAL_ERROR');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 404 for unknown routes
 // ---------------------------------------------------------------------------
 

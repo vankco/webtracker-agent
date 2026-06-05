@@ -232,6 +232,11 @@ export interface JsonConfig {
   apiPort?: number;
   plugins?: string[];
 
+  // Discord bot — read by discord-bot.ts only, never exposed via GET /api/config
+  discordBotToken?: string;
+  discordBotClientId?: string;
+  discordBotGuildId?: string;
+
   llm?: {
     gemini?: {
       enabled?: boolean;
@@ -296,6 +301,9 @@ function jsonToEnv(json: JsonConfig, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv
   if (json.discordWebhookUrl !== undefined) env['DISCORD_WEBHOOK_URL']     = json.discordWebhookUrl;
   if (json.apiPort !== undefined)           env['API_PORT']                = String(json.apiPort);
   if (json.plugins !== undefined)           env['PLUGINS']                 = json.plugins.join(',');
+  if (json.discordBotToken !== undefined)   env['DISCORD_BOT_TOKEN']       = json.discordBotToken;
+  if (json.discordBotClientId !== undefined) env['DISCORD_BOT_CLIENT_ID'] = json.discordBotClientId;
+  if (json.discordBotGuildId !== undefined)  env['DISCORD_BOT_GUILD_ID']  = json.discordBotGuildId;
 
   const g = json.llm?.gemini;
   if (g) {

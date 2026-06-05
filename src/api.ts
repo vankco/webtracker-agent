@@ -24,6 +24,7 @@ import { defaultLlmAnalyzer } from './llm.js';
 import { scrapePageText } from './scraper.js';
 import { loadState } from './state.js';
 import { predictAvailability } from './predictor.js';
+import { answerQuestion, buildAskPrompt } from './bot-qa.js';
 import type {
   ApiSuccessResponse,
   ApiErrorResponse,
@@ -34,6 +35,7 @@ import type {
   ValidateScrapeRequest,
   ValidateScrapeResponse,
   StartMonitorRequest,
+  AskRequest,
 } from './api-types.js';
 
 // ---------------------------------------------------------------------------
@@ -144,7 +146,8 @@ export function createApiRouter(
   configStore: ConfigStore,
   monitorController: MonitorController,
   persistConfig: (config: AppConfig) => void = saveJsonConfig,
-  predictor: typeof predictAvailability = predictAvailability
+  predictor: typeof predictAvailability = predictAvailability,
+  qaAnswerer: typeof answerQuestion = answerQuestion
 ): express.Router {
   const router = express.Router();
 
@@ -397,6 +400,48 @@ export function createApiRouter(
     ok(res, { cleared: true });
   });
 
+  // -------------------------------------------------------------------------
+  // POST /api/ask
+  // -------------------------------------------------------------------------
+  router.post('/ask', async (req: Request, res: Response) => {
+    const body = req.body as AskRequest;
+
+    if (typeof body?.question !== 'string' || !body.question.trim()) {
+      return fail(res, 'VALIDATION_ERROR', '`question` is required.');
+    }
+
+    const config = configStore.get();
+    const url = config.target.url;
+
+    if (!url) {
+      return fail(res, 'NOT_CONFIGURED', 'No target URL configured.', 422);
+    }
+
+    const providers = getEnabledProvidersByPriority(config);
+    if (providers.length === 0) {
+      return fail(res, 'NOT_CONFIGURED', 'No LLM providers enabled.', 422);
+    }
+
+    const state = loadState();
+    const plugin = monitorController.findPlugin(url);
+
+    const currentProductsText =
+      plugin && state?.lastProducts ? plugin.productsToText(state.lastProducts) : '';
+    const historyText =
+      plugin?.formatHistoryForPrediction && state?.history
+        ? plugin.formatHistoryForPrediction(state.history)
+        : '';
+
+    try {
+      const prompt = buildAskPrompt(url, currentProductsText, historyText, body.question.trim());
+      const answer = await qaAnswerer(prompt, providers);
+      ok(res, { answer });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      fail(res, 'INTERNAL_ERROR', message, 502);
+    }
+  });
+
   // POST /api/validate/scrape
   // -------------------------------------------------------------------------
   router.post('/validate/scrape', async (req: Request, res: Response) => {
@@ -484,7 +529,8 @@ export function createApiApp(
   configStore: ConfigStore,
   monitorController: MonitorController,
   persistConfig: (config: AppConfig) => void = saveJsonConfig,
-  predictor: typeof predictAvailability = predictAvailability
+  predictor: typeof predictAvailability = predictAvailability,
+  qaAnswerer: typeof answerQuestion = answerQuestion
 ): express.Application {
   const app = express();
 
@@ -495,7 +541,7 @@ export function createApiApp(
   void warmModelCache(configStore.get());
 
   // Mount all routes under /api
-  app.use('/api', createApiRouter(configStore, monitorController, persistConfig, predictor));
+  app.use('/api', createApiRouter(configStore, monitorController, persistConfig, predictor, qaAnswerer));
 
   // 404 handler for unmatched /api routes
   app.use('/api', (_req: Request, res: Response) => {

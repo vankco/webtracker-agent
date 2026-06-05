@@ -6,9 +6,10 @@
     "plugins/*"
   ],
   "scripts": {
-    "start": "API_PORT=3001 concurrently -n api,ui,mon -c cyan,magenta,yellow \"tsx --watch src/agent.ts\" \"npm run client:dev\" \"tsx src/health-monitor.ts\"",
-    "stop": "pkill -9 -f 'src/agent.ts' 2>/dev/null; pkill -9 -f 'src/health-monitor.ts' 2>/dev/null; pkill -9 -f '.browser-profile' 2>/dev/null; lsof -ti:3001,5173 2>/dev/null | xargs -r kill -9 2>/dev/null; rm -f .browser-profile/Singleton*; true",
+    "start": "API_PORT=3001 concurrently -n api,ui,mon,bot -c cyan,magenta,yellow,blue \"tsx --watch src/agent.ts\" \"npm run client:dev\" \"tsx src/health-monitor.ts\" \"tsx src/discord-bot.ts\"",
+    "stop": "pkill -9 -f 'src/agent.ts' 2>/dev/null; pkill -9 -f 'src/health-monitor.ts' 2>/dev/null; pkill -9 -f 'src/discord-bot.ts' 2>/dev/null; pkill -9 -f '.browser-profile' 2>/dev/null; lsof -ti:3001,5173 2>/dev/null | xargs -r kill -9 2>/dev/null; rm -f .browser-profile/Singleton*; true",
     "monitor": "tsx src/health-monitor.ts",
+    "bot": "tsx src/discord-bot.ts",
     "dev": "tsx --watch src/agent.ts",
     "api": "set API_PORT=3001&& tsx src/agent.ts",
     "api:dev": "set API_PORT=3001&& tsx --watch src/agent.ts",
@@ -29,6 +30,7 @@
     "@webtracker/plugin-hermes": "file:plugins/hermes",
     "cors": "^2.8.6",
     "diff": "^9.0.0",
+    "discord.js": "^14.26.4",
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
     "groq-sdk": "^1.2.0",
