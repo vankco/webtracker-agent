@@ -323,28 +323,6 @@ export function ProvidersPage() {
                   </div>
                 )}
 
-                {modelsForProvider && !isEditing && (
-                  <details>
-                    <summary style={{ cursor: 'pointer', listStyle: 'none' }}>
-                      <Caption1 className={styles.metaLabel}>
-                        Available models ({modelsForProvider.models.length}) ▸
-                      </Caption1>
-                    </summary>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalXS, marginTop: tokens.spacingVerticalXS }}>
-                      {modelsForProvider.models.map((m: ModelEntry) => (
-                        <Badge
-                          key={m.id}
-                          appearance={m.id === provider.model ? 'filled' : 'outline'}
-                          color={m.tier === 'free' ? 'success' : 'informative'}
-                          size="small"
-                          title={m.tier === 'free' ? 'Free tier' : 'Paid'}
-                        >
-                          {m.id}
-                        </Badge>
-                      ))}
-                    </div>
-                  </details>
-                )}
 
                 {/* Inline edit form */}
                 {isEditing && editDraft && (

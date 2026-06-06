@@ -147,7 +147,6 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 - **Enable / Disable** each LLM provider with the toggle
 - **Edit** — change the model, API key, priority, timeout, and retries
 - **Test connection** — sends a real LLM request with sample content and shows the full model response (`changed` + `summary`)
-- **Available models** — expandable list fetched live from the provider API on startup, with free/paid tier badges
 - **Priority** — lower number = tried first. If priority 1 fails, priority 2 is tried automatically
 
 ### Config page
