@@ -145,6 +145,7 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 ### Providers page
 
 - **Enable / Disable** each LLM provider with the toggle
+- **Drag to reorder** — drag the ⠿ handle to change provider priority order; saves automatically
 - **Edit** — change the model, API key, priority, timeout, and retries
 - **Test connection** — sends a real LLM request with sample content and shows the full model response (`changed` + `summary`)
 - **Priority** — lower number = tried first. If priority 1 fails, priority 2 is tried automatically
