@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { diffWordsWithSpace, type Change } from 'diff';
+import { parseLlmJson } from './utils.js';
 
 export interface AnalysisResult {
   changed: boolean;
@@ -206,9 +207,7 @@ export async function analyzeChanges(
       throw new Error('Empty Gemini response text.');
     }
 
-    // Strip accidental markdown code fences
-    const json = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-    return JSON.parse(json) as AnalysisResult;
+    return parseLlmJson<AnalysisResult>(raw);
   } catch (err) {
     // Re-throw so analyzeWithProviders can try the next provider (e.g. Groq)
     // instead of silently falling back to local diff here.

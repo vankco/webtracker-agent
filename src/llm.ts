@@ -7,6 +7,7 @@ import {
   type AnalysisResult,
 } from './analyzer.js';
 import type { LlmProviderConfig } from './config.js';
+import { parseLlmJson, tryEachProvider } from './utils.js';
 
 export interface AnalysisResultWithMeta extends AnalysisResult {
   /** Which provider produced this result (undefined = local fallback). */
@@ -65,9 +66,7 @@ async function analyzeWithGroq(
     throw new Error('Empty Groq response.');
   }
 
-  // Strip accidental markdown fences just in case
-  const json = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-  return JSON.parse(json) as AnalysisResult;
+  return parseLlmJson<AnalysisResult>(raw);
 }
 
 // ---------------------------------------------------------------------------
@@ -104,30 +103,20 @@ export async function analyzeWithProviders(
 ): Promise<AnalysisResultWithMeta> {
   const failureChain: Array<{ provider: string; reason: string }> = [];
 
-  for (const provider of providers) {
-    const start = Date.now();
-    try {
-      const result = await analyzer.analyze(url, oldContent, newContent, provider);
-      return {
-        ...result,
-        provider: provider.id,
-        model: provider.model,
-        latencyMs: Date.now() - start,
-        fallback: false,
-      };
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      failureChain.push({ provider: provider.id, reason });
-      console.warn(`[llm] Provider '${provider.id}' failed (${reason}). Trying next…`);
-    }
+  const hit = await tryEachProvider(
+    providers,
+    (p) => analyzer.analyze(url, oldContent, newContent, p),
+    ({ providerId, reason }) => {
+      failureChain.push({ provider: providerId, reason });
+      console.warn(`[llm] Provider '${providerId}' failed (${reason}). Trying next…`);
+    },
+  );
+
+  if (hit) {
+    return { ...hit.value, provider: hit.providerId, model: hit.model, latencyMs: hit.latencyMs, fallback: false };
   }
 
   // All providers exhausted — always return local analysis (never hard-fail the monitor loop)
   console.warn('[llm] All LLM providers failed. Using local diff fallback.');
-  const fallbackResult = localFallbackAnalysis(oldContent, newContent);
-  return {
-    ...fallbackResult,
-    fallback: true,
-    failureChain,
-  };
+  return { ...localFallbackAnalysis(oldContent, newContent), fallback: true, failureChain };
 }

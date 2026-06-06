@@ -12,6 +12,7 @@
 
 import 'dotenv/config';
 import { resolveEnv } from './config.js';
+import { getErrorMessage } from './utils.js';
 
 const env = resolveEnv();
 const PORT = env['API_PORT'] || '3001';
@@ -42,7 +43,7 @@ async function notify(content: string): Promise<void> {
       body: JSON.stringify({ content }),
     });
   } catch (err) {
-    console.error('[health-monitor] Discord notify failed:', err instanceof Error ? err.message : err);
+    console.error('[health-monitor] Discord notify failed:', getErrorMessage(err));
   }
 }
 
@@ -128,7 +129,7 @@ async function checkFlapping(): Promise<void> {
       console.log(`[health-monitor] No flapping — counts stable or trending: ${counts.join(', ')}`);
     }
   } catch (err) {
-    console.error('[health-monitor] Flap check failed:', err instanceof Error ? err.message : err);
+    console.error('[health-monitor] Flap check failed:', getErrorMessage(err));
   }
 }
 

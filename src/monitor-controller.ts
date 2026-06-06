@@ -19,6 +19,7 @@ import {
   type ConfigStore,
 } from './config.js';
 import { log } from './logger.js';
+import { getErrorMessage } from './utils.js';
 import type {
   MonitorStatus,
   LastCheckResult,
@@ -121,7 +122,7 @@ export class MonitorController {
     } catch (err) {
       this.recordError(err);
       if (!this.shuttingDown) {
-        log('error', 'monitor', 'Initial check failed', { error: err instanceof Error ? err.message : String(err) });
+        log('error', 'monitor', 'Initial check failed', { error: getErrorMessage(err) });
       }
     }
 
@@ -395,7 +396,7 @@ export class MonitorController {
   }
 
   private recordError(err: unknown): void {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = getErrorMessage(err);
 
     // A check interrupted by a deliberate shutdown isn't a real failure —
     // log it quietly (info) so it doesn't fire a Discord error alert.

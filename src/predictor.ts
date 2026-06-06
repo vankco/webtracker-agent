@@ -10,6 +10,7 @@ import { GoogleGenAI } from '@google/genai';
 import Groq from 'groq-sdk';
 import type { LlmProviderConfig } from './config.js';
 import { log } from './logger.js';
+import { parseLlmJson, tryEachProvider } from './utils.js';
 
 export interface PredictionResult {
   generatedAt: string;
@@ -49,8 +50,7 @@ Respond with JSON in exactly this format:
 }
 
 function parsePrediction(raw: string): RawPrediction {
-  const json = raw.trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-  const parsed = JSON.parse(json) as RawPrediction;
+  const parsed = parseLlmJson<RawPrediction>(raw);
   if (typeof parsed.summary !== 'string' || !Array.isArray(parsed.insights)) {
     throw new Error('Prediction response missing summary or insights.');
   }
@@ -108,31 +108,29 @@ export async function predictAvailability(
 ): Promise<PredictionResult> {
   const failures: string[] = [];
 
-  for (const provider of providers) {
-    try {
-      let raw: RawPrediction;
-      if (provider.id === 'gemini') {
-        raw = await predictWithGemini(url, historyText, provider);
-      } else if (provider.id === 'groq') {
-        raw = await predictWithGroq(url, historyText, provider);
-      } else {
-        throw new Error(`Provider '${provider.id}' not supported for prediction.`);
-      }
+  const hit = await tryEachProvider(
+    providers,
+    (p) => {
+      if (p.id === 'gemini') return predictWithGemini(url, historyText, p);
+      if (p.id === 'groq') return predictWithGroq(url, historyText, p);
+      throw new Error(`Provider '${p.id}' not supported for prediction.`);
+    },
+    ({ providerId, reason }) => {
+      failures.push(`${providerId}: ${reason}`);
+      log('warn', 'llm', `[predictor] Provider '${providerId}' failed — trying next`, { provider: providerId, reason });
+    },
+  );
 
-      return {
-        generatedAt: new Date().toISOString(),
-        provider: provider.id,
-        model: provider.model,
-        summary: raw.summary,
-        insights: raw.insights,
-        historyEntryCount,
-      };
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      failures.push(`${provider.id}: ${reason}`);
-      log('warn', 'llm', `[predictor] Provider '${provider.id}' failed — trying next`, { provider: provider.id, reason });
-    }
+  if (!hit) {
+    throw new Error(`All providers failed to generate a prediction. ${failures.join('; ')}`);
   }
 
-  throw new Error(`All providers failed to generate a prediction. ${failures.join('; ')}`);
+  return {
+    generatedAt: new Date().toISOString(),
+    provider: hit.providerId,
+    model: hit.model,
+    summary: hit.value.summary,
+    insights: hit.value.insights,
+    historyEntryCount,
+  };
 }

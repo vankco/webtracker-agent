@@ -7,25 +7,12 @@ import { rmSync } from 'node:fs';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import type { BrowserConfig } from './config.js';
 import type { SitePlugin } from './plugin-types.js';
+import { parseBooleanEnv, parseIntEnv } from './utils.js';
 
 chromium.use(StealthPlugin());
 
 let persistentContext: BrowserContext | null = null;
 let persistentPage: Page | null = null;
-
-function parseBooleanEnv(value: string | undefined, defaultValue: boolean): boolean {
-  if (value == null) return defaultValue;
-  const normalized = value.trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
-  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
-  return defaultValue;
-}
-
-function parseIntEnv(value: string | undefined, defaultValue: number): number {
-  if (value == null || value.trim() === '') return defaultValue;
-  const parsed = parseInt(value, 10);
-  return Number.isNaN(parsed) ? defaultValue : parsed;
-}
 
 async function navigateWithFallback(page: Page, url: string, timeoutMs: number): Promise<void> {
   // Reset to about:blank first so the next goto is always a *real* navigation.
