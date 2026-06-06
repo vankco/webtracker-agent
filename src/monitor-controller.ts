@@ -129,20 +129,27 @@ export class MonitorController {
       return;
     }
 
-    const intervalMs = config.schedule.intervalMs;
-    this.scheduleNext(intervalMs);
-
-    this.intervalHandle = setInterval(async () => {
-      // Re-read config from store so runtime updates take effect between checks
+    const scheduleLoop = (): void => {
       const currentConfig = configStore.get();
-      try {
-        await this.runCheck(currentConfig);
-      } catch (err) {
-        this.recordError(err);
-        console.error('[monitor] Check failed:', err);
-      }
-      this.scheduleNext(currentConfig.schedule.intervalMs);
-    }, intervalMs);
+      const base = currentConfig.schedule.intervalMs;
+      // Apply ±20% jitter so checks don't land on a predictable schedule
+      const jitter = base * 0.2;
+      const next = Math.round(base + (Math.random() * 2 - 1) * jitter);
+      this.scheduleNext(next);
+      this.intervalHandle = setTimeout(async () => {
+        if (!this.running) return;
+        try {
+          await this.runCheck(configStore.get());
+        } catch (err) {
+          this.recordError(err);
+          console.error('[monitor] Check failed:', err);
+        }
+        if (this.running) scheduleLoop();
+      }, next) as unknown as ReturnType<typeof setInterval>;
+    };
+
+    this.scheduleNext(config.schedule.intervalMs);
+    scheduleLoop();
   }
 
   /** Stop the monitor loop and close the browser session. */

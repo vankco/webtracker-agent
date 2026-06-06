@@ -197,6 +197,10 @@ export async function scrapePageText(
       });
     }
 
+    // Random pre-navigation delay (5–20 s) to avoid predictable request patterns
+    const preNavDelay = 5_000 + Math.floor(Math.random() * 15_000);
+    await new Promise((r) => setTimeout(r, preNavDelay));
+
     await navigateWithFallback(page, url, gotoTimeoutMs);
     await dismissNotificationBanner(page);
 
