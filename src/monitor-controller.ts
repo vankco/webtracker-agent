@@ -5,6 +5,9 @@
  */
 
 import { scrapePageText, closeScraperSession } from './scraper.js';
+
+const PRODUCT_ALERT_AVATAR = 'https://raw.githubusercontent.com/vankco/webtracker-agent/main/assets/webhook-avatar.png';
+const PRODUCT_ALERT_USERNAME = 'Hermès Monitor';
 import type { SitePlugin } from './plugin-types.js';
 import { PluginRegistry } from './plugin-registry.js';
 import { sendDiscordAlert } from './notifier.js';
@@ -220,7 +223,7 @@ export class MonitorController {
         const alertBody = plugin.formatBaselineMessage(currentAvailable);
         const chunks = chunkSummaryForAlerts(alertBody);
         for (const chunk of chunks) {
-          await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk);
+          await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk, undefined, undefined, PRODUCT_ALERT_USERNAME, PRODUCT_ALERT_AVATAR);
         }
         log('info', 'monitor', 'Baseline alert sent', { available: currentAvailable.length });
       } else {
@@ -305,7 +308,7 @@ export class MonitorController {
         const chunks = chunkSummaryForAlerts(pluginDiff.alertBody);
         const linkLabel = `📊 ${currentAvailable.length} available total`;
         for (const chunk of chunks) {
-          await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk, undefined, linkLabel);
+          await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk, undefined, linkLabel, PRODUCT_ALERT_USERNAME, PRODUCT_ALERT_AVATAR);
         }
         log('info', 'monitor', `${chunks.length} alert(s) sent`, { summary: finalSummary });
       }
@@ -365,7 +368,7 @@ export class MonitorController {
     if (analysisResult.changed) {
       const chunks = chunkSummaryForAlerts(analysisResult.summary);
       for (const chunk of chunks) {
-        await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk);
+        await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk, undefined, undefined, PRODUCT_ALERT_USERNAME, PRODUCT_ALERT_AVATAR);
       }
       console.log(`[monitor] Change detected — ${chunks.length} alert(s) sent ✓`);
     } else {

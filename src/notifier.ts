@@ -22,7 +22,9 @@ export async function sendDiscordAlert(
   url: string,
   summary: string,
   title = '🔔 Website Change Detected',
-  linkLabel = 'Available Bags'
+  linkLabel = 'Available Bags',
+  username?: string,
+  avatarUrl?: string
 ): Promise<void> {
   const safeDescription = truncateForDiscordField(cleanUrlsInText(summary), 4096);
   const urlField = url
@@ -31,7 +33,9 @@ export async function sendDiscordAlert(
 
   const fields = urlField ? [{ name: '​', value: urlField, inline: false }] : [];
 
-  const payload = {
+  const payload: Record<string, unknown> = {
+    ...(username ? { username } : {}),
+    ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
     embeds: [
       {
         title,
