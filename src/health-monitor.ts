@@ -102,7 +102,13 @@ async function checkFlapping(): Promise<void> {
       console.log(`[health-monitor] Not enough fetch entries to check flapping (${fetches.length}).`);
       return;
     }
-    const counts = fetches.slice(0, 6).map((l) => l.details!['availableProducts'] as number);
+    const counts = fetches.slice(0, 6)
+      .map((l) => l.details!['availableProducts'] as number)
+      .filter((n) => n > 0); // exclude empty-scrape results (0 = failed fetch, not real data)
+    if (counts.length < 3) {
+      console.log('[health-monitor] Not enough non-zero fetch entries to check flapping.');
+      return;
+    }
     if (new Set(counts).size > 1) {
       lastFlapAlert = Date.now();
       await notify(`🔄 **WebTracker Flapping Detected** — availableProducts varies across recent scrapes: [${counts.join(', ')}]. Possible lazy-load timing issue.`);

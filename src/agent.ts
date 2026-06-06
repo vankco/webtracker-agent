@@ -28,13 +28,15 @@ function parseIntEnv(value: string | undefined, defaultValue: number): number {
 // Main
 // ---------------------------------------------------------------------------
 
-function registerDiscordAlerts(webhookUrl: string): void {
-  if (!webhookUrl) return;
+function registerDiscordAlerts(getWebhookUrl: () => string): void {
   setAlertCallback((entry: LogEntry) => {
+    const url = getWebhookUrl();
+    if (!url) return;
     const emoji = entry.level === 'error' ? '🔴' : '⚠️';
     const details = entry.details ? ` | ${JSON.stringify(entry.details)}` : '';
     const message = `${emoji} **[${entry.level.toUpperCase()}]** [${entry.category}] ${entry.message}${details}`;
-    sendDiscordAlert(webhookUrl, '', message).catch(() => {});
+    const title = entry.level === 'error' ? '🔴 System Error' : '⚠️ System Warning';
+    sendDiscordAlert(url, '', message, title).catch(() => {});
   });
   console.log('[agent] Discord alerts enabled for warn/error log entries.');
 }
@@ -67,8 +69,7 @@ async function main(): Promise<void> {
 
     startApiServer(configStore, monitorController, apiPort);
     registerSignalHandlers(monitorController);
-    const systemWebhook = initial.notifications.discordSystemWebhookUrl || initial.notifications.discordWebhookUrl;
-    registerDiscordAlerts(systemWebhook);
+    registerDiscordAlerts(() => configStore.get().notifications.discordSystemWebhookUrl);
 
     // Auto-start the monitor if config is already valid (target URL + credentials set)
     const validationErrors = configStore.validate();
@@ -96,8 +97,7 @@ async function main(): Promise<void> {
     const monitorController = new MonitorController({}, registry);
 
     registerSignalHandlers(monitorController);
-    const cliSystemWebhook = config.notifications.discordSystemWebhookUrl || config.notifications.discordWebhookUrl;
-    registerDiscordAlerts(cliSystemWebhook);
+    registerDiscordAlerts(() => configStore.get().notifications.discordSystemWebhookUrl);
     await monitorController.start(configStore);
   }
 }

@@ -209,9 +209,6 @@ export class MonitorController {
         : `Scrape returned empty content — ${target.url} may have blocked the request or failed to load`;
       log('warn', 'scrape', msg, { url: target.url, selector: target.selector });
       this.recordError(new Error(msg));
-      if (config.notifications.discordWebhookUrl) {
-        await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, `⚠️ ${msg}`);
-      }
       this.lastCheck = new Date().toISOString();
       return;
     }

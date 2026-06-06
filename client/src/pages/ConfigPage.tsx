@@ -73,6 +73,27 @@ const useStyles = makeStyles({
     padding: tokens.spacingVerticalXXL,
     color: tokens.colorNeutralForeground3,
   },
+  stickyBar: {
+    position: 'fixed',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: tokens.spacingHorizontalS,
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+    zIndex: 100,
+    '@media (min-width: 601px)': {
+      display: 'none',
+    },
+  },
+  pageBottomPad: {
+    '@media (max-width: 600px)': {
+      paddingBottom: '72px',
+    },
+  },
 });
 
 interface Draft {
@@ -201,7 +222,7 @@ export function ConfigPage() {
   const systemWebhookConfigured = Boolean(saved.notifications.discordSystemWebhookUrl);
 
   return (
-    <div className={styles.root}>
+    <div className={`${styles.root} ${styles.pageBottomPad}`}>
       {/* Header row */}
       <div className={styles.titleRow}>
         <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM }}>
@@ -436,6 +457,28 @@ export function ConfigPage() {
           </div>
         </Card>
       </div>
+
+      {/* Sticky save bar — mobile only, shown when there are unsaved changes */}
+      {dirty && (
+        <div className={styles.stickyBar}>
+          <Button
+            icon={<ArrowCounterclockwiseRegular />}
+            appearance="subtle"
+            onClick={handleReset}
+            disabled={saving}
+          >
+            Reset
+          </Button>
+          <Button
+            icon={<SaveRegular />}
+            appearance="primary"
+            onClick={() => void handleSave()}
+            disabled={saving}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

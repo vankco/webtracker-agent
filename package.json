@@ -6,8 +6,9 @@
     "plugins/*"
   ],
   "scripts": {
-    "start": "API_PORT=3001 concurrently -n api,ui,mon -c cyan,magenta,yellow \"tsx --watch src/agent.ts\" \"npm run client:dev\" \"tsx src/health-monitor.ts\"",
-    "stop": "pkill -9 -f 'src/agent.ts' 2>/dev/null; pkill -9 -f 'src/health-monitor.ts' 2>/dev/null; pkill -9 -f '.browser-profile' 2>/dev/null; lsof -ti:3001,5173 2>/dev/null | xargs -r kill -9 2>/dev/null; rm -f .browser-profile/Singleton*; true",
+    "start": "API_PORT=3001 concurrently -n api,ui,mon,bot -c cyan,magenta,yellow,blue \"tsx --watch src/agent.ts\" \"npm run client:dev\" \"tsx src/health-monitor.ts\" \"tsx src/discord-bot.ts\"",
+    "stop": "bash -c 'pkill -9 -f src/agent.ts || true; pkill -9 -f src/health-monitor.ts || true; pkill -9 -f src/discord-bot.ts || true; pkill -9 -f concurrently || true; pkill -9 -f vite || true; pkill -9 -f .browser-profile || true; for port in 3001 5173 5174 5175; do lsof -ti:$port 2>/dev/null | xargs -r kill -9; done; rm -f .browser-profile/Singleton*; sleep 2; REMAINING=$(ps aux | grep -E \"src/agent|src/health-monitor|src/discord-bot|concurrently|vite\" | grep -v grep | wc -l); echo \"Stopped. Remaining app processes: $REMAINING\"'",
+    "restart": "npm stop && npm start",
     "monitor": "tsx src/health-monitor.ts",
     "dev": "tsx --watch src/agent.ts",
     "api": "set API_PORT=3001&& tsx src/agent.ts",
