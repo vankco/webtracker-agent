@@ -9,6 +9,7 @@
 import { GoogleGenAI } from '@google/genai';
 import Groq from 'groq-sdk';
 import type { LlmProviderConfig } from './config.js';
+import { log } from './logger.js';
 
 export interface PredictionResult {
   generatedAt: string;
@@ -129,7 +130,7 @@ export async function predictAvailability(
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       failures.push(`${provider.id}: ${reason}`);
-      console.warn(`[predictor] Provider '${provider.id}' failed (${reason}). Trying next…`);
+      log('warn', 'llm', `[predictor] Provider '${provider.id}' failed — trying next`, { provider: provider.id, reason });
     }
   }
 
