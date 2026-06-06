@@ -113,7 +113,7 @@ describe('sendDiscordAlert', () => {
     const fields = embed?.fields ?? [];
     // Summary now rendered as embed description (supports markdown)
     expect(embed?.description).toBe('Summary text');
-    expect(fields.some((f) => f.name === 'URL')).toBe(true);
+    expect(fields.some((f) => f.value.includes('Available Bags'))).toBe(true);
   });
 
   it('throws when response is not ok', async () => {

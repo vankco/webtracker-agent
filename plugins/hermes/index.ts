@@ -249,7 +249,7 @@ export function formatHermesDiscordMessage(diff: HermesDiff, totalCount: number)
     sections.push(`💰 **Updated (${diff.changed.length})**\n${changedLines.join('\n')}`);
   }
 
-  return `${sections.join('\n\n')}\n\n📊 ${totalCount} available total`;
+  return sections.join('\n\n');
 }
 
 export function formatHermesHistory(history: HistoryEntry[]): string {

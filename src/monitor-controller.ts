@@ -303,8 +303,9 @@ export class MonitorController {
 
       if (pluginDiff.hasChanges && config.notifications.discordWebhookUrl) {
         const chunks = chunkSummaryForAlerts(pluginDiff.alertBody);
+        const linkLabel = `📊 ${currentAvailable.length} available total`;
         for (const chunk of chunks) {
-          await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk);
+          await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk, undefined, linkLabel);
         }
         log('info', 'monitor', `${chunks.length} alert(s) sent`, { summary: finalSummary });
       }

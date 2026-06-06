@@ -21,10 +21,15 @@ export async function sendDiscordAlert(
   webhookUrl: string,
   url: string,
   summary: string,
-  title = '🔔 Website Change Detected'
+  title = '🔔 Website Change Detected',
+  linkLabel = 'Available Bags'
 ): Promise<void> {
-  const safeUrl = truncateForDiscordField(url ? cleanDisplayUrl(url) : '', 1024);
   const safeDescription = truncateForDiscordField(cleanUrlsInText(summary), 4096);
+  const urlField = url
+    ? truncateForDiscordField(`[${linkLabel}](${url})`, 1024)
+    : '';
+
+  const fields = urlField ? [{ name: '​', value: urlField, inline: false }] : [];
 
   const payload = {
     embeds: [
@@ -32,9 +37,7 @@ export async function sendDiscordAlert(
         title,
         description: safeDescription,
         color: 0xf59e0b, // amber
-        fields: [
-          { name: 'URL', value: safeUrl, inline: false },
-        ],
+        fields,
         footer: { text: 'Website Monitor Agent' },
         timestamp: new Date().toISOString(),
       },
