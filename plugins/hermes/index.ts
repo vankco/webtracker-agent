@@ -235,10 +235,10 @@ export function formatHermesDiscordMessage(diff: HermesDiff, totalCount: number)
   const sections: string[] = [];
 
   if (diff.added.length > 0) {
-    sections.push(`➕ **Newly Available (${diff.added.length})**\n${diff.added.map(productLine).join('\n')}`);
+    sections.push(`🟢 **Newly Available (${diff.added.length})**\n${diff.added.map(productLine).join('\n')}`);
   }
   if (diff.removed.length > 0) {
-    sections.push(`➖ **No Longer Available (${diff.removed.length})**\n${diff.removed.map(productLine).join('\n')}`);
+    sections.push(`🔴 **No Longer Available (${diff.removed.length})**\n${diff.removed.map(productLine).join('\n')}`);
   }
   if (diff.changed.length > 0) {
     const changedLines = diff.changed.map(({ old: o, new: n }) => {
