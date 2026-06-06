@@ -6,7 +6,7 @@
 
 import { scrapePageText, closeScraperSession } from './scraper.js';
 
-const PRODUCT_ALERT_AVATAR = 'https://raw.githubusercontent.com/vankco/webtracker-agent/main/assets/webhook-avatar.png';
+const PRODUCT_ALERT_AVATAR = 'https://raw.githubusercontent.com/vankco/webtracker-agent/main/assets/birkin-bag-avatar.png';
 const PRODUCT_ALERT_USERNAME = 'Hermès Monitor';
 import type { SitePlugin } from './plugin-types.js';
 import { PluginRegistry } from './plugin-registry.js';
