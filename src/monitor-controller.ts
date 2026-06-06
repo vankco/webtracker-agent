@@ -64,6 +64,7 @@ export class MonitorController {
   private nextCheck: string | undefined;
   private recentErrors: MonitorError[] = [];
   private recentSnapshots: ContentSnapshot[] = [];
+  private emptyBackoff = false; // apply 2x interval after an empty scrape (possible bot block)
   private readonly deps: MonitorDependencies;
   private readonly registry: PluginRegistry;
 
@@ -132,9 +133,12 @@ export class MonitorController {
     const scheduleLoop = (): void => {
       const currentConfig = configStore.get();
       const base = currentConfig.schedule.intervalMs;
-      // Apply ±20% jitter so checks don't land on a predictable schedule
+      // 2x interval after an empty scrape (possible bot block); ±20% jitter otherwise
+      const multiplier = this.emptyBackoff ? 2 : 1;
+      this.emptyBackoff = false;
       const jitter = base * 0.2;
-      const next = Math.round(base + (Math.random() * 2 - 1) * jitter);
+      const next = Math.round(base * multiplier + (Math.random() * 2 - 1) * jitter);
+      if (multiplier > 1) log('warn', 'monitor', `Empty scrape backoff — next check in ${Math.round(next / 1000)}s`);
       this.scheduleNext(next);
       this.intervalHandle = setTimeout(async () => {
         if (!this.running) return;
@@ -219,6 +223,7 @@ export class MonitorController {
         : `Scrape returned empty content — ${target.url} may have blocked the request or failed to load`;
       log('warn', 'scrape', msg, { url: target.url, selector: target.selector });
       this.recordError(new Error(msg));
+      this.emptyBackoff = true;
       this.lastCheck = new Date().toISOString();
       return;
     }
