@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Planned work
 
-- **Replace Playwright with Chrome Extension scraper** — Full plan saved at `~/.claude/plans/we-have-been-using-soft-clarke.md`. Goal: eliminate Playwright automation fingerprints by running scrapes inside the user's real Chrome via a Manifest V3 extension + Node.js WebSocket bridge. Key files: `src/page-adapter.ts` (new), `src/extension-bridge.ts` (new), `chrome-extension/` (new), `src/scraper.ts` (major rewrite), `src/plugin-types.ts`, `plugins/hermes/index.ts`, `src/config.ts`. Remove `playwright`, `playwright-extra`, `puppeteer-extra-plugin-stealth` deps; add `ws`.
+- **Replace Playwright with Chrome Extension scraper** — Full plan saved at `~/.claude/plans/playwright-migrate-chrome-extension.md`. Goal: eliminate Playwright automation fingerprints by running scrapes inside the user's real Chrome via a Manifest V3 extension + Node.js WebSocket bridge. Key files: `src/page-adapter.ts` (new), `src/extension-bridge.ts` (new), `chrome-extension/` (new), `src/scraper.ts` (major rewrite), `src/plugin-types.ts`, `plugins/hermes/index.ts`, `src/config.ts`. Remove `playwright`, `playwright-extra`, `puppeteer-extra-plugin-stealth` deps; add `ws`.
 
 ## Working conventions
 
