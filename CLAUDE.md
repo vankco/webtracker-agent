@@ -5,6 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Working conventions
 
 - **Never switch git branches without explicit confirmation from the user.**
+- **Changes to app code** (`src/`, `plugins/`, `client/src/`, `scripts/`) — show the diff and wait for user review before committing.
+- **Non-app changes** (`CLAUDE.md`, `README.md`, `.gitignore`, config examples, docs) — can be committed automatically without review.
 
 ## Commands
 
