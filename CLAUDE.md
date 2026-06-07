@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Working conventions
+
+- **Never switch git branches without explicit confirmation from the user.**
+
 ## Commands
 
 ```bash
