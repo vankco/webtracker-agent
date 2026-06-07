@@ -7,3 +7,4 @@ logs.jsonl
 config.json
 coverage/
 .vscode/
+debug/

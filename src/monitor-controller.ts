@@ -5,6 +5,9 @@
  */
 
 import { scrapePageText, closeScraperSession } from './scraper.js';
+
+const PRODUCT_ALERT_AVATAR = 'https://raw.githubusercontent.com/vankco/webtracker-agent/main/assets/birkin-bag-avatar.png';
+const PRODUCT_ALERT_USERNAME = 'Hermès Monitor';
 import type { SitePlugin } from './plugin-types.js';
 import { PluginRegistry } from './plugin-registry.js';
 import { sendDiscordAlert } from './notifier.js';
@@ -16,6 +19,7 @@ import {
   type ConfigStore,
 } from './config.js';
 import { log } from './logger.js';
+import { getErrorMessage } from './utils.js';
 import type {
   MonitorStatus,
   LastCheckResult,
@@ -61,6 +65,7 @@ export class MonitorController {
   private nextCheck: string | undefined;
   private recentErrors: MonitorError[] = [];
   private recentSnapshots: ContentSnapshot[] = [];
+  private emptyBackoff = false; // apply 2x interval after an empty scrape (possible bot block)
   private readonly deps: MonitorDependencies;
   private readonly registry: PluginRegistry;
 
@@ -117,7 +122,7 @@ export class MonitorController {
     } catch (err) {
       this.recordError(err);
       if (!this.shuttingDown) {
-        log('error', 'monitor', 'Initial check failed', { error: err instanceof Error ? err.message : String(err) });
+        log('error', 'monitor', 'Initial check failed', { error: getErrorMessage(err) });
       }
     }
 
@@ -126,20 +131,30 @@ export class MonitorController {
       return;
     }
 
-    const intervalMs = config.schedule.intervalMs;
-    this.scheduleNext(intervalMs);
-
-    this.intervalHandle = setInterval(async () => {
-      // Re-read config from store so runtime updates take effect between checks
+    const scheduleLoop = (): void => {
       const currentConfig = configStore.get();
-      try {
-        await this.runCheck(currentConfig);
-      } catch (err) {
-        this.recordError(err);
-        console.error('[monitor] Check failed:', err);
-      }
-      this.scheduleNext(currentConfig.schedule.intervalMs);
-    }, intervalMs);
+      const base = currentConfig.schedule.intervalMs;
+      // 2x interval after an empty scrape (possible bot block); ±20% jitter otherwise
+      const multiplier = this.emptyBackoff ? 2 : 1;
+      this.emptyBackoff = false;
+      const jitter = base * 0.2;
+      const next = Math.round(base * multiplier + (Math.random() * 2 - 1) * jitter);
+      if (multiplier > 1) log('warn', 'monitor', `Empty scrape backoff — next check in ${Math.round(next / 1000)}s`);
+      this.scheduleNext(next);
+      this.intervalHandle = setTimeout(async () => {
+        if (!this.running) return;
+        try {
+          await this.runCheck(configStore.get());
+        } catch (err) {
+          this.recordError(err);
+          console.error('[monitor] Check failed:', err);
+        }
+        if (this.running) scheduleLoop();
+      }, next) as unknown as ReturnType<typeof setInterval>;
+    };
+
+    this.scheduleNext(config.schedule.intervalMs);
+    scheduleLoop();
   }
 
   /** Stop the monitor loop and close the browser session. */
@@ -209,6 +224,7 @@ export class MonitorController {
         : `Scrape returned empty content — ${target.url} may have blocked the request or failed to load`;
       log('warn', 'scrape', msg, { url: target.url, selector: target.selector });
       this.recordError(new Error(msg));
+      this.emptyBackoff = true;
       this.lastCheck = new Date().toISOString();
       return;
     }
@@ -220,7 +236,7 @@ export class MonitorController {
         const alertBody = plugin.formatBaselineMessage(currentAvailable);
         const chunks = chunkSummaryForAlerts(alertBody);
         for (const chunk of chunks) {
-          await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk);
+          await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk, undefined, undefined, PRODUCT_ALERT_USERNAME, PRODUCT_ALERT_AVATAR);
         }
         log('info', 'monitor', 'Baseline alert sent', { available: currentAvailable.length });
       } else {
@@ -303,8 +319,9 @@ export class MonitorController {
 
       if (pluginDiff.hasChanges && config.notifications.discordWebhookUrl) {
         const chunks = chunkSummaryForAlerts(pluginDiff.alertBody);
+        const linkLabel = `📊 ${currentAvailable.length} available total`;
         for (const chunk of chunks) {
-          await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk);
+          await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk, undefined, linkLabel, PRODUCT_ALERT_USERNAME, PRODUCT_ALERT_AVATAR);
         }
         log('info', 'monitor', `${chunks.length} alert(s) sent`, { summary: finalSummary });
       }
@@ -364,7 +381,7 @@ export class MonitorController {
     if (analysisResult.changed) {
       const chunks = chunkSummaryForAlerts(analysisResult.summary);
       for (const chunk of chunks) {
-        await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk);
+        await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk, undefined, undefined, PRODUCT_ALERT_USERNAME, PRODUCT_ALERT_AVATAR);
       }
       console.log(`[monitor] Change detected — ${chunks.length} alert(s) sent ✓`);
     } else {
@@ -379,7 +396,7 @@ export class MonitorController {
   }
 
   private recordError(err: unknown): void {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = getErrorMessage(err);
 
     // A check interrupted by a deliberate shutdown isn't a real failure —
     // log it quietly (info) so it doesn't fire a Discord error alert.

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   makeStyles,
   tokens,
@@ -27,6 +27,7 @@ import {
   EditRegular,
   SaveRegular,
   DismissRegular,
+  ReOrderDotsVerticalRegular,
 } from '@fluentui/react-icons';
 import { api, ApiError } from '../api/client.js';
 import type { SafeLlmProviderConfig, ProviderModels, ProviderUpdate, ModelEntry } from '../api/types.js';
@@ -39,13 +40,10 @@ const useStyles = makeStyles({
     maxWidth: '900px',
     width: '100%',
   },
-  providerGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))',
+  providerList: {
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
-    '@media (max-width: 600px)': {
-      gridTemplateColumns: '1fr',
-    },
   },
   providerCard: {
     display: 'flex',
@@ -109,6 +107,21 @@ const useStyles = makeStyles({
     flexWrap: 'wrap',
     gap: tokens.spacingHorizontalS,
   },
+  dragHandle: {
+    cursor: 'grab',
+    color: tokens.colorNeutralForeground3,
+    display: 'flex',
+    alignItems: 'center',
+    padding: `0 ${tokens.spacingHorizontalXS}`,
+    ':active': { cursor: 'grabbing' },
+  },
+  cardDragging: {
+    opacity: '0.4',
+  },
+  cardDragOver: {
+    outline: `2px solid ${tokens.colorBrandBackground}`,
+    outlineOffset: '2px',
+  },
 });
 
 const PROVIDER_DISPLAY: Record<string, string> = {
@@ -143,12 +156,15 @@ export function ProvidersPage() {
   const [editDraft, setEditDraft] = useState<ProviderEditDraft | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const dragSaving = useRef(false);
 
   useEffect(() => {
     void (async () => {
       try {
         const [p, m] = await Promise.all([api.providers.list(), api.providers.models()]);
-        setProviders(p);
+        setProviders(p.slice().sort((a, b) => a.priority - b.priority));
         setModels(m);
       } catch (err) {
         setErrorMsg(err instanceof ApiError ? err.message : 'Failed to load providers.');
@@ -192,7 +208,7 @@ export function ProvidersPage() {
         update.apiKey = editDraft.apiKey.trim();
       }
       const updated = await api.providers.update({ providers: [update] });
-      setProviders(updated);
+      setProviders(updated.slice().sort((a, b) => a.priority - b.priority));
       setEditingId(null);
       setEditDraft(null);
     } catch (err) {
@@ -207,7 +223,7 @@ export function ProvidersPage() {
       const updated = await api.providers.update({
         providers: [{ id: id as 'gemini' | 'groq', enabled }],
       });
-      setProviders(updated);
+      setProviders(updated.slice().sort((a, b) => a.priority - b.priority));
     } catch (err) {
       setErrorMsg(err instanceof ApiError ? err.message : 'Failed to update provider.');
     }
@@ -219,23 +235,52 @@ export function ProvidersPage() {
       const result = await api.providers.test({ providerId: id as 'gemini' | 'groq' });
       setTestStates((prev) => ({
         ...prev,
-        [id]: {
-          loading: false,
-          success: result.success,
-          latencyMs: result.latencyMs,
-          error: result.error,
-          result: result.result,
-        },
+        [id]: { loading: false, success: result.success, latencyMs: result.latencyMs, error: result.error, result: result.result },
       }));
     } catch (err) {
       setTestStates((prev) => ({
         ...prev,
-        [id]: {
-          loading: false,
-          success: false,
-          error: err instanceof ApiError ? err.message : 'Test failed.',
-        },
+        [id]: { loading: false, success: false, error: err instanceof ApiError ? err.message : 'Test failed.' },
       }));
+    }
+  }
+
+  function handleDragStart(id: string) {
+    setDraggedId(id);
+  }
+
+  function handleDragOver(e: React.DragEvent, id: string) {
+    e.preventDefault();
+    if (id !== draggedId) setDragOverId(id);
+  }
+
+  async function handleDrop(targetId: string) {
+    if (!draggedId || draggedId === targetId || dragSaving.current) return;
+    setDraggedId(null);
+    setDragOverId(null);
+
+    const reordered = [...providers];
+    const fromIdx = reordered.findIndex((p) => p.id === draggedId);
+    const toIdx = reordered.findIndex((p) => p.id === targetId);
+    if (fromIdx === -1 || toIdx === -1) return;
+
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved);
+
+    // Assign priorities based on new order
+    const withNewPriorities = reordered.map((p, i) => ({ ...p, priority: i + 1 }));
+    setProviders(withNewPriorities);
+
+    dragSaving.current = true;
+    try {
+      const updated = await api.providers.update({
+        providers: withNewPriorities.map((p) => ({ id: p.id as 'gemini' | 'groq', priority: p.priority })),
+      });
+      setProviders(updated.slice().sort((a, b) => a.priority - b.priority));
+    } catch (err) {
+      setErrorMsg(err instanceof ApiError ? err.message : 'Failed to save order.');
+    } finally {
+      dragSaving.current = false;
     }
   }
 
@@ -262,248 +307,208 @@ export function ProvidersPage() {
 
       <Divider />
 
-      <div className={styles.providerGrid}>
+      <div className={styles.providerList}>
         {providers.map((provider) => {
           const displayName = PROVIDER_DISPLAY[provider.id] ?? provider.id;
           const modelsForProvider = models.find((m) => m.providerId === provider.id);
           const test = testStates[provider.id];
           const isEditing = editingId === provider.id;
+          const isDragging = draggedId === provider.id;
+          const isDragOver = dragOverId === provider.id;
 
           return (
-            <Card key={provider.id}>
-              <CardHeader
-                image={<BrainCircuitRegular fontSize={24} />}
-                header={
-                  <div className={styles.row}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
-                      <Title3>{displayName}</Title3>
-                      {provider.enabled ? (
-                        <Badge appearance="filled" color="success" icon={<CheckmarkCircleRegular />}>
-                          Enabled
-                        </Badge>
-                      ) : (
-                        <Badge appearance="outline" color="informative" icon={<DismissCircleRegular />}>
-                          Disabled
-                        </Badge>
-                      )}
+            <div
+              key={provider.id}
+              draggable={!isEditing}
+              onDragStart={() => handleDragStart(provider.id)}
+              onDragOver={(e) => handleDragOver(e, provider.id)}
+              onDrop={() => void handleDrop(provider.id)}
+              onDragEnd={() => { setDraggedId(null); setDragOverId(null); }}
+              className={isDragging ? styles.cardDragging : isDragOver ? styles.cardDragOver : undefined}
+            >
+              <Card>
+                <CardHeader
+                  image={
+                    <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS }}>
+                      <span className={styles.dragHandle} title="Drag to reorder">
+                        <ReOrderDotsVerticalRegular fontSize={20} />
+                      </span>
+                      <BrainCircuitRegular fontSize={24} />
                     </div>
-                    <Switch
-                      checked={provider.enabled}
-                      onChange={(_e, data) => void handleToggle(provider.id, data.checked)}
-                      label=""
-                    />
-                  </div>
-                }
-              />
+                  }
+                  header={
+                    <div className={styles.row}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+                        <Title3>{displayName}</Title3>
+                        {provider.enabled ? (
+                          <Badge appearance="filled" color="success" icon={<CheckmarkCircleRegular />}>Enabled</Badge>
+                        ) : (
+                          <Badge appearance="outline" color="informative" icon={<DismissCircleRegular />}>Disabled</Badge>
+                        )}
+                      </div>
+                      <Switch
+                        checked={provider.enabled}
+                        onChange={(_e, data) => void handleToggle(provider.id, data.checked)}
+                        label=""
+                      />
+                    </div>
+                  }
+                />
 
-              <div className={styles.providerCard}>
-                {/* Meta grid (read view) */}
-                {!isEditing && (
-                  <div className={styles.metaGrid}>
-                    <Caption1 className={styles.metaLabel}>Model</Caption1>
-                    <Caption1>{provider.model}</Caption1>
+                <div className={styles.providerCard}>
+                  {!isEditing && (
+                    <div className={styles.metaGrid}>
+                      <Caption1 className={styles.metaLabel}>Model</Caption1>
+                      <Caption1>{provider.model}</Caption1>
 
-                    <Caption1 className={styles.metaLabel}>Priority</Caption1>
-                    <Caption1>{provider.priority}</Caption1>
+                      <Caption1 className={styles.metaLabel}>Priority</Caption1>
+                      <Caption1>{provider.priority}</Caption1>
 
-                    <Caption1 className={styles.metaLabel}>API Key</Caption1>
-                    <Caption1>
-                      {provider.apiKeyConfigured ? (
-                        <Badge appearance="filled" color="success" size="small">Configured</Badge>
-                      ) : (
-                        <Badge appearance="outline" color="warning" size="small">Not set</Badge>
-                      )}
-                    </Caption1>
-
-                    <Caption1 className={styles.metaLabel}>Timeout</Caption1>
-                    <Caption1>{provider.timeoutMs / 1000} s</Caption1>
-
-                    <Caption1 className={styles.metaLabel}>Retries</Caption1>
-                    <Caption1>{provider.maxRetries}</Caption1>
-                  </div>
-                )}
-
-                {modelsForProvider && !isEditing && (
-                  <details>
-                    <summary style={{ cursor: 'pointer', listStyle: 'none' }}>
-                      <Caption1 className={styles.metaLabel}>
-                        Available models ({modelsForProvider.models.length}) ▸
+                      <Caption1 className={styles.metaLabel}>API Key</Caption1>
+                      <Caption1>
+                        {provider.apiKeyConfigured ? (
+                          <Badge appearance="filled" color="success" size="small">Configured</Badge>
+                        ) : (
+                          <Badge appearance="outline" color="warning" size="small">Not set</Badge>
+                        )}
                       </Caption1>
-                    </summary>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalXS, marginTop: tokens.spacingVerticalXS }}>
-                      {modelsForProvider.models.map((m: ModelEntry) => (
-                        <Badge
-                          key={m.id}
-                          appearance={m.id === provider.model ? 'filled' : 'outline'}
-                          color={m.tier === 'free' ? 'success' : 'informative'}
-                          size="small"
-                          title={m.tier === 'free' ? 'Free tier' : 'Paid'}
-                        >
-                          {m.id}
-                        </Badge>
-                      ))}
+
+                      <Caption1 className={styles.metaLabel}>Timeout</Caption1>
+                      <Caption1>{provider.timeoutMs / 1000} s</Caption1>
+
+                      <Caption1 className={styles.metaLabel}>Retries</Caption1>
+                      <Caption1>{provider.maxRetries}</Caption1>
                     </div>
-                  </details>
-                )}
-
-                {/* Inline edit form */}
-                {isEditing && editDraft && (
-                  <div className={styles.editForm}>
-                    <Field label="Model">
-                      <Select
-                        value={editDraft.model}
-                        onChange={(e) =>
-                          setEditDraft((d) => d ? { ...d, model: e.target.value } : d)
-                        }
-                      >
-                        {(modelsForProvider?.models ?? [{ id: editDraft.model, tier: 'paid' as const }]).map((m: ModelEntry) => (
-                          <option key={m.id} value={m.id}>
-                            {m.id} ({m.tier})
-                          </option>
-                        ))}
-                      </Select>
-                    </Field>
-
-                    <Field label="API Key">
-                      <Input
-                        type="password"
-                        value={editDraft.apiKey}
-                        onChange={(e) =>
-                          setEditDraft((d) => d ? { ...d, apiKey: e.target.value } : d)
-                        }
-                        placeholder={
-                          provider.apiKeyConfigured
-                            ? 'Leave blank to keep current key'
-                            : 'Enter API key'
-                        }
-                      />
-                    </Field>
-                    <Text className={styles.hintText}>API key is write-only and never echoed back.</Text>
-
-                    <div className={styles.editRow}>
-                      <Field label="Priority">
-                        <Input
-                          type="number"
-                          value={editDraft.priority}
-                          onChange={(e) =>
-                            setEditDraft((d) => d ? { ...d, priority: e.target.value } : d)
-                          }
-                          min={1}
-                        />
-                      </Field>
-                      <Field label="Timeout (seconds)">
-                        <Input
-                          type="number"
-                          value={editDraft.timeoutSeconds}
-                          onChange={(e) =>
-                            setEditDraft((d) => d ? { ...d, timeoutSeconds: e.target.value } : d)
-                          }
-                          min={1}
-                        />
-                      </Field>
-                    </div>
-
-                    <Field label="Max retries">
-                      <Input
-                        type="number"
-                        value={editDraft.maxRetries}
-                        onChange={(e) =>
-                          setEditDraft((d) => d ? { ...d, maxRetries: e.target.value } : d)
-                        }
-                        min={0}
-                        max={10}
-                      />
-                    </Field>
-
-                    {editError && (
-                      <Text style={{ color: tokens.colorStatusDangerForeground1, fontSize: tokens.fontSizeBase200 }}>
-                        {editError}
-                      </Text>
-                    )}
-
-                    <div className={styles.editActions}>
-                      <Button
-                        icon={<DismissRegular />}
-                        appearance="subtle"
-                        size="small"
-                        onClick={handleEditCancel}
-                        disabled={editSaving}
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        icon={editSaving ? <Spinner size="tiny" /> : <SaveRegular />}
-                        appearance="primary"
-                        size="small"
-                        onClick={() => void handleEditSave(provider.id)}
-                        disabled={editSaving}
-                      >
-                        {editSaving ? 'Saving…' : 'Save'}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                <Divider />
-
-                <div className={styles.cardFooter}>
-                  {!isEditing ? (
-                    <Button
-                      icon={<EditRegular />}
-                      size="small"
-                      appearance="outline"
-                      onClick={() => handleEditStart(provider)}
-                    >
-                      Edit
-                    </Button>
-                  ) : (
-                    <div />
                   )}
 
-                  {!isEditing && (
-                    <Button
-                      size="small"
-                      appearance="outline"
-                      disabled={!provider.apiKeyConfigured || !provider.enabled || test?.loading}
-                      icon={test?.loading ? <Spinner size="tiny" /> : undefined}
-                      onClick={() => void handleTest(provider.id)}
-                    >
-                      Test connection
-                    </Button>
+                  {isEditing && editDraft && (
+                    <div className={styles.editForm}>
+                      <Field label="Model">
+                        <Select
+                          value={editDraft.model}
+                          onChange={(e) => setEditDraft((d) => d ? { ...d, model: e.target.value } : d)}
+                        >
+                          {(modelsForProvider?.models ?? [{ id: editDraft.model, tier: 'paid' as const }]).map((m: ModelEntry) => (
+                            <option key={m.id} value={m.id}>{m.id} ({m.tier})</option>
+                          ))}
+                        </Select>
+                      </Field>
+
+                      <Field label="API Key">
+                        <Input
+                          type="password"
+                          value={editDraft.apiKey}
+                          onChange={(e) => setEditDraft((d) => d ? { ...d, apiKey: e.target.value } : d)}
+                          placeholder={provider.apiKeyConfigured ? 'Leave blank to keep current key' : 'Enter API key'}
+                        />
+                      </Field>
+                      <Text className={styles.hintText}>API key is write-only and never echoed back.</Text>
+
+                      <div className={styles.editRow}>
+                        <Field label="Priority">
+                          <Input
+                            type="number"
+                            value={editDraft.priority}
+                            onChange={(e) => setEditDraft((d) => d ? { ...d, priority: e.target.value } : d)}
+                            min={1}
+                          />
+                        </Field>
+                        <Field label="Timeout (seconds)">
+                          <Input
+                            type="number"
+                            value={editDraft.timeoutSeconds}
+                            onChange={(e) => setEditDraft((d) => d ? { ...d, timeoutSeconds: e.target.value } : d)}
+                            min={1}
+                          />
+                        </Field>
+                      </div>
+
+                      <Field label="Max retries">
+                        <Input
+                          type="number"
+                          value={editDraft.maxRetries}
+                          onChange={(e) => setEditDraft((d) => d ? { ...d, maxRetries: e.target.value } : d)}
+                          min={0}
+                          max={10}
+                        />
+                      </Field>
+
+                      {editError && (
+                        <Text style={{ color: tokens.colorStatusDangerForeground1, fontSize: tokens.fontSizeBase200 }}>
+                          {editError}
+                        </Text>
+                      )}
+
+                      <div className={styles.editActions}>
+                        <Button icon={<DismissRegular />} appearance="subtle" size="small" onClick={handleEditCancel} disabled={editSaving}>
+                          Cancel
+                        </Button>
+                        <Button
+                          icon={editSaving ? <Spinner size="tiny" /> : <SaveRegular />}
+                          appearance="primary"
+                          size="small"
+                          onClick={() => void handleEditSave(provider.id)}
+                          disabled={editSaving}
+                        >
+                          {editSaving ? 'Saving…' : 'Save'}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  <Divider />
+
+                  <div className={styles.cardFooter}>
+                    {!isEditing ? (
+                      <Button icon={<EditRegular />} size="small" appearance="outline" onClick={() => handleEditStart(provider)}>
+                        Edit
+                      </Button>
+                    ) : (
+                      <div />
+                    )}
+                    {!isEditing && (
+                      <Button
+                        size="small"
+                        appearance="outline"
+                        disabled={!provider.apiKeyConfigured || !provider.enabled || test?.loading}
+                        icon={test?.loading ? <Spinner size="tiny" /> : undefined}
+                        onClick={() => void handleTest(provider.id)}
+                      >
+                        Test connection
+                      </Button>
+                    )}
+                  </div>
+
+                  {test && !test.loading && !isEditing && (
+                    <div className={styles.testResult}>
+                      {test.success ? (
+                        <>
+                          <Body1 style={{ color: tokens.colorStatusSuccessForeground1 }}>
+                            ✓ Connected — {test.latencyMs}ms
+                          </Body1>
+                          {test.result && (
+                            <div style={{ marginTop: tokens.spacingVerticalXS }}>
+                              <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>Model response:</Caption1>
+                              <div style={{ fontFamily: 'monospace', fontSize: tokens.fontSizeBase200, marginTop: '2px' }}>
+                                <span style={{ color: test.result.changed ? tokens.colorStatusWarningForeground1 : tokens.colorStatusSuccessForeground1 }}>
+                                  changed: {String(test.result.changed)}
+                                </span>
+                                <br />
+                                <span>summary: "{test.result.summary}"</span>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <Body1 style={{ color: tokens.colorStatusDangerForeground1 }}>
+                          ✗ {test.error ?? 'Connection failed'}
+                        </Body1>
+                      )}
+                    </div>
                   )}
                 </div>
-
-                {test && !test.loading && !isEditing && (
-                  <div className={styles.testResult}>
-                    {test.success ? (
-                      <>
-                        <Body1 style={{ color: tokens.colorStatusSuccessForeground1 }}>
-                          ✓ Connected — {test.latencyMs}ms
-                        </Body1>
-                        {test.result && (
-                          <div style={{ marginTop: tokens.spacingVerticalXS }}>
-                            <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>
-                              Model response:
-                            </Caption1>
-                            <div style={{ fontFamily: 'monospace', fontSize: tokens.fontSizeBase200, marginTop: '2px' }}>
-                              <span style={{ color: test.result.changed ? tokens.colorStatusWarningForeground1 : tokens.colorStatusSuccessForeground1 }}>
-                                changed: {String(test.result.changed)}
-                              </span>
-                              <br />
-                              <span>summary: "{test.result.summary}"</span>
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <Body1 style={{ color: tokens.colorStatusDangerForeground1 }}>
-                        ✗ {test.error ?? 'Connection failed'}
-                      </Body1>
-                    )}
-                  </div>
-                )}
-              </div>
-            </Card>
+              </Card>
+            </div>
           );
         })}
       </div>

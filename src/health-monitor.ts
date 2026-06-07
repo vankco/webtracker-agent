@@ -12,6 +12,7 @@
 
 import 'dotenv/config';
 import { resolveEnv } from './config.js';
+import { getErrorMessage } from './utils.js';
 
 const env = resolveEnv();
 const PORT = env['API_PORT'] || '3001';
@@ -42,7 +43,7 @@ async function notify(content: string): Promise<void> {
       body: JSON.stringify({ content }),
     });
   } catch (err) {
-    console.error('[health-monitor] Discord notify failed:', err instanceof Error ? err.message : err);
+    console.error('[health-monitor] Discord notify failed:', getErrorMessage(err));
   }
 }
 
@@ -109,15 +110,26 @@ async function checkFlapping(): Promise<void> {
       console.log('[health-monitor] Not enough non-zero fetch entries to check flapping.');
       return;
     }
-    if (new Set(counts).size > 1) {
+    // True flapping = count changes direction at least once (goes up then down, or down then up).
+    // A monotonic drop/rise (e.g. 15→14→14→14) is a legitimate product change, not flapping.
+    let directionChanges = 0;
+    for (let i = 1; i < counts.length; i++) {
+      const prev = counts[i - 1]!;
+      const curr = counts[i]!;
+      if (curr > prev) directionChanges++;
+      else if (curr < prev) directionChanges++;
+    }
+    const isFlapping = directionChanges >= 2;
+
+    if (isFlapping) {
       lastFlapAlert = Date.now();
-      await notify(`🔄 **WebTracker Flapping Detected** — availableProducts varies across recent scrapes: [${counts.join(', ')}]. Possible lazy-load timing issue.`);
+      await notify(`🔄 **WebTracker Flapping Detected** — availableProducts bouncing across recent scrapes: [${counts.join(', ')}]. Possible lazy-load timing issue.`);
       console.log(`[health-monitor] Flapping alert sent — counts: ${counts.join(', ')}`);
     } else {
-      console.log(`[health-monitor] No flapping — counts stable: ${counts.join(', ')}`);
+      console.log(`[health-monitor] No flapping — counts stable or trending: ${counts.join(', ')}`);
     }
   } catch (err) {
-    console.error('[health-monitor] Flap check failed:', err instanceof Error ? err.message : err);
+    console.error('[health-monitor] Flap check failed:', getErrorMessage(err));
   }
 }
 

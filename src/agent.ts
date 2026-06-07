@@ -13,16 +13,7 @@ import { loadPlugins } from './plugin-registry.js';
 import { setAlertCallback } from './logger.js';
 import { sendDiscordAlert } from './notifier.js';
 import type { LogEntry } from './logger.js';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function parseIntEnv(value: string | undefined, defaultValue: number): number {
-  if (value == null || value.trim() === '') return defaultValue;
-  const parsed = parseInt(value, 10);
-  return Number.isNaN(parsed) ? defaultValue : parsed;
-}
+import { parseIntEnv } from './utils.js';
 
 // ---------------------------------------------------------------------------
 // Main

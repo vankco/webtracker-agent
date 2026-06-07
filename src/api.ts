@@ -21,6 +21,7 @@ import {
 import { MonitorController } from './monitor-controller.js';
 import { getLogs, clearLogs } from './logger.js';
 import { defaultLlmAnalyzer } from './llm.js';
+import { getErrorMessage } from './utils.js';
 import { scrapePageText } from './scraper.js';
 import { loadState } from './state.js';
 import { predictAvailability } from './predictor.js';
@@ -303,7 +304,7 @@ export function createApiRouter(
       };
       ok(res, response);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = getErrorMessage(err);
       const response: TestProviderResponse = {
         providerId: body.providerId,
         model: provider.model,
@@ -355,7 +356,7 @@ export function createApiRouter(
       });
       ok(res, { started: true, message: 'Monitor started.' }, 202);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = getErrorMessage(err);
       fail(res, 'INTERNAL_ERROR', message, 500);
     }
   });
@@ -372,7 +373,7 @@ export function createApiRouter(
       await monitorController.stop();
       ok(res, { stopped: true, message: 'Monitor stopped.' });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = getErrorMessage(err);
       fail(res, 'INTERNAL_ERROR', message, 500);
     }
   });
@@ -424,7 +425,7 @@ export function createApiRouter(
       };
       ok(res, response);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = getErrorMessage(err);
       const response: ValidateScrapeResponse = {
         success: false,
         error: message,
@@ -471,7 +472,7 @@ export function createApiRouter(
       const result = await predictor(url, historyText, providers, history.length);
       ok(res, result);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = getErrorMessage(err);
       fail(res, 'PREDICTION_FAILED', message, 502);
     }
   });

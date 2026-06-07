@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { parseBooleanEnv, parseIntEnv, getErrorMessage } from './utils.js';
 
 export type LlmProviderId = 'gemini' | 'groq';
 
@@ -68,20 +69,6 @@ export interface SafeAppConfig extends Omit<AppConfig, 'llmProviders'> {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-function parseBooleanEnv(value: string | undefined, defaultValue: boolean): boolean {
-  if (value == null) return defaultValue;
-  const normalized = value.trim().toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
-  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
-  return defaultValue;
-}
-
-function parseIntEnv(value: string | undefined, defaultValue: number): number {
-  if (value == null || value.trim() === '') return defaultValue;
-  const parsed = parseInt(value, 10);
-  return Number.isNaN(parsed) ? defaultValue : parsed;
-}
 
 function requireEnv(key: string, env: NodeJS.ProcessEnv): string {
   const value = env[key];
@@ -401,9 +388,39 @@ export function resolveEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Proces
       return jsonToEnv(json, base);
     }
   } catch (err) {
-    console.warn(`[config] Failed to parse config.json: ${err instanceof Error ? err.message : err}. Falling back to env.`);
+    console.warn(`[config] Failed to parse config.json: ${getErrorMessage(err)}. Falling back to env.`);
   }
   return base;
+}
+
+// ---------------------------------------------------------------------------
+// Shared env-to-config builders (used by both loaders below)
+// ---------------------------------------------------------------------------
+
+function buildBrowserConfig(env: NodeJS.ProcessEnv): BrowserConfig {
+  const manualAssisted = parseBooleanEnv(env['MANUAL_ASSISTED'], false);
+  const persistSession = manualAssisted || parseBooleanEnv(env['BROWSER_PERSIST_SESSION'], true);
+  return {
+    manualAssisted,
+    manualAssistedInitialWaitMs: Math.max(0, parseIntEnv(env['MANUAL_ASSISTED_INITIAL_WAIT_MS'], 120_000)),
+    persistSession,
+    headless: manualAssisted ? false : parseBooleanEnv(env['BROWSER_HEADLESS'], true),
+    slowMoMs: Math.max(0, parseIntEnv(env['BROWSER_SLOW_MO_MS'], 0)),
+    keepOpenMs: Math.max(0, parseIntEnv(env['BROWSER_KEEP_OPEN_MS'], 0)),
+    gotoTimeoutMs: Math.max(10_000, parseIntEnv(env['BROWSER_GOTO_TIMEOUT_MS'], 60_000)),
+    userDataDir: env['BROWSER_USER_DATA_DIR'] || '.browser-profile',
+  };
+}
+
+function buildScheduleConfig(env: NodeJS.ProcessEnv): ScheduleConfig {
+  return {
+    intervalMs: Math.max(1_000, parseIntEnv(env['CHECK_INTERVAL_MS'], 300_000)),
+    runOnce: parseBooleanEnv(env['RUN_ONCE'], false),
+  };
+}
+
+function buildPlugins(env: NodeJS.ProcessEnv): string[] {
+  return env['PLUGINS'] ? env['PLUGINS'].split(',').map(s => s.trim()).filter(Boolean) : [];
 }
 
 // ---------------------------------------------------------------------------
@@ -411,34 +428,19 @@ export function resolveEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Proces
 // ---------------------------------------------------------------------------
 
 export function loadAppConfig(env: NodeJS.ProcessEnv = resolveEnv()): AppConfig {
-  const manualAssisted = parseBooleanEnv(env['MANUAL_ASSISTED'], false);
-  const persistSession = manualAssisted || parseBooleanEnv(env['BROWSER_PERSIST_SESSION'], true);
-
   const config: AppConfig = {
     target: {
       url: requireEnv('TARGET_URL', env),
       selector: env['TARGET_SELECTOR'] ?? '',
     },
-    schedule: {
-      intervalMs: Math.max(1_000, parseIntEnv(env['CHECK_INTERVAL_MS'], 300_000)),
-      runOnce: parseBooleanEnv(env['RUN_ONCE'], false),
-    },
-    browser: {
-      manualAssisted,
-      manualAssistedInitialWaitMs: Math.max(0, parseIntEnv(env['MANUAL_ASSISTED_INITIAL_WAIT_MS'], 120_000)),
-      persistSession,
-      headless: manualAssisted ? false : parseBooleanEnv(env['BROWSER_HEADLESS'], true),
-      slowMoMs: Math.max(0, parseIntEnv(env['BROWSER_SLOW_MO_MS'], 0)),
-      keepOpenMs: Math.max(0, parseIntEnv(env['BROWSER_KEEP_OPEN_MS'], 0)),
-      gotoTimeoutMs: Math.max(10_000, parseIntEnv(env['BROWSER_GOTO_TIMEOUT_MS'], 60_000)),
-      userDataDir: env['BROWSER_USER_DATA_DIR'] || '.browser-profile',
-    },
+    schedule: buildScheduleConfig(env),
+    browser: buildBrowserConfig(env),
     notifications: {
       discordWebhookUrl: requireEnv('DISCORD_WEBHOOK_URL', env),
       discordSystemWebhookUrl: env['DISCORD_SYSTEM_WEBHOOK_URL'] ?? '',
     },
     llmProviders: parseProviderConfig(env),
-    plugins: env['PLUGINS'] ? env['PLUGINS'].split(',').map(s => s.trim()).filter(Boolean) : [],
+    plugins: buildPlugins(env),
   };
 
   const errors = validateAppConfig(config);
@@ -459,34 +461,19 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = resolveEnv()): AppConfig 
  * primary entry-point and the user will configure fields via the API.
  */
 export function loadAppConfigLenient(env: NodeJS.ProcessEnv = resolveEnv()): AppConfig {
-  const manualAssisted = parseBooleanEnv(env['MANUAL_ASSISTED'], false);
-  const persistSession = manualAssisted || parseBooleanEnv(env['BROWSER_PERSIST_SESSION'], true);
-
   return {
     target: {
       url: env['TARGET_URL'] ?? '',
       selector: env['TARGET_SELECTOR'] ?? '',
     },
-    schedule: {
-      intervalMs: Math.max(1_000, parseIntEnv(env['CHECK_INTERVAL_MS'], 300_000)),
-      runOnce: parseBooleanEnv(env['RUN_ONCE'], false),
-    },
-    browser: {
-      manualAssisted,
-      manualAssistedInitialWaitMs: Math.max(0, parseIntEnv(env['MANUAL_ASSISTED_INITIAL_WAIT_MS'], 120_000)),
-      persistSession,
-      headless: manualAssisted ? false : parseBooleanEnv(env['BROWSER_HEADLESS'], true),
-      slowMoMs: Math.max(0, parseIntEnv(env['BROWSER_SLOW_MO_MS'], 0)),
-      keepOpenMs: Math.max(0, parseIntEnv(env['BROWSER_KEEP_OPEN_MS'], 0)),
-      gotoTimeoutMs: Math.max(10_000, parseIntEnv(env['BROWSER_GOTO_TIMEOUT_MS'], 60_000)),
-      userDataDir: env['BROWSER_USER_DATA_DIR'] || '.browser-profile',
-    },
+    schedule: buildScheduleConfig(env),
+    browser: buildBrowserConfig(env),
     notifications: {
       discordWebhookUrl: env['DISCORD_WEBHOOK_URL'] ?? '',
       discordSystemWebhookUrl: env['DISCORD_SYSTEM_WEBHOOK_URL'] ?? '',
     },
     llmProviders: parseProviderConfig(env),
-    plugins: env['PLUGINS'] ? env['PLUGINS'].split(',').map(s => s.trim()).filter(Boolean) : [],
+    plugins: buildPlugins(env),
   };
 }
 

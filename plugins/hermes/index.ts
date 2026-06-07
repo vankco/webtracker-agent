@@ -235,10 +235,10 @@ export function formatHermesDiscordMessage(diff: HermesDiff, totalCount: number)
   const sections: string[] = [];
 
   if (diff.added.length > 0) {
-    sections.push(`➕ **Newly Available (${diff.added.length})**\n${diff.added.map(productLine).join('\n')}`);
+    sections.push(`✅ **Newly Available (${diff.added.length})**\n${diff.added.map(productLine).join('\n')}`);
   }
   if (diff.removed.length > 0) {
-    sections.push(`➖ **No Longer Available (${diff.removed.length})**\n${diff.removed.map(productLine).join('\n')}`);
+    sections.push(`❌ **No Longer Available (${diff.removed.length})**\n${diff.removed.map(productLine).join('\n')}`);
   }
   if (diff.changed.length > 0) {
     const changedLines = diff.changed.map(({ old: o, new: n }) => {
@@ -249,7 +249,7 @@ export function formatHermesDiscordMessage(diff: HermesDiff, totalCount: number)
     sections.push(`💰 **Updated (${diff.changed.length})**\n${changedLines.join('\n')}`);
   }
 
-  return `${sections.join('\n\n')}\n\n📊 ${totalCount} available total`;
+  return sections.join('\n\n');
 }
 
 export function formatHermesHistory(history: HistoryEntry[]): string {

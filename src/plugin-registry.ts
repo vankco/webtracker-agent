@@ -1,4 +1,5 @@
 import type { SitePlugin } from './plugin-types.js';
+import { getErrorMessage } from './utils.js';
 
 export class PluginRegistry {
   private plugins: SitePlugin[] = [];
@@ -24,7 +25,7 @@ export async function loadPlugins(names: string[]): Promise<PluginRegistry> {
         console.warn(`[plugins] "${name}" has no default export — skipped.`);
       }
     } catch (err) {
-      console.warn(`[plugins] Failed to load "${name}": ${err instanceof Error ? err.message : err}`);
+      console.warn(`[plugins] Failed to load "${name}": ${getErrorMessage(err)}`);
     }
   }
   return registry;
