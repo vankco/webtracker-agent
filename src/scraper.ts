@@ -4,6 +4,7 @@ import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { resolve, join } from 'node:path';
 import { rmSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import type { BrowserConfig } from './config.js';
 import type { SitePlugin } from './plugin-types.js';
@@ -35,6 +36,25 @@ async function navigateWithFallback(page: Page, url: string, timeoutMs: number):
   });
 }
 
+function killChromiumHoldingProfile(userDataDir: string): void {
+  try {
+    const resolved = resolve(userDataDir);
+    if (process.platform === 'win32') {
+      execSync(
+        `powershell -NoProfile -Command "` +
+        `Get-CimInstance Win32_Process -Filter \\"name='chrome.exe'\\" | ` +
+        `Where-Object { $_.CommandLine -like '*${resolved.replace(/\\/g, '\\\\')}*' } | ` +
+        `ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`,
+        { stdio: 'ignore', timeout: 5000 }
+      );
+    } else {
+      execSync(`pkill -9 -f "${resolved}" 2>/dev/null || true`, { stdio: 'ignore', timeout: 5000 });
+    }
+  } catch {
+    // Non-fatal — best-effort cleanup.
+  }
+}
+
 function isPersistentSessionEnabled(): boolean {
   const manualAssisted = parseBooleanEnv(process.env['MANUAL_ASSISTED'], false);
   const persistentRequested = parseBooleanEnv(process.env['BROWSER_PERSIST_SESSION'], true);
@@ -55,9 +75,11 @@ async function getOrCreateSessionPage(
     userDataDirOverride || process.env['BROWSER_USER_DATA_DIR'] || '.browser-profile'
   );
 
-  // Remove stale Chrome singleton locks left behind by a previous process that
-  // didn't shut down cleanly (e.g. crash or tsx --watch restart). Without this,
-  // launchPersistentContext fails with "Failed to create a ProcessSingleton".
+  // Kill any lingering Chrome process still holding this user-data-dir, then
+  // remove its singleton locks. tsx --watch kills Node but Chrome may outlive
+  // the parent; a second launchPersistentContext into the same dir exits with
+  // code 21 ("Failed to create a ProcessSingleton") unless we clean up first.
+  killChromiumHoldingProfile(userDataDir);
   for (const lock of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
     try {
       rmSync(join(userDataDir, lock), { force: true });
@@ -71,6 +93,7 @@ async function getOrCreateSessionPage(
     headless,
     slowMo: slowMoMs > 0 ? slowMoMs : undefined,
     viewport: null,
+    args: headless ? [] : ['--start-maximized'],
   });
 
   const existingPage = persistentContext.pages()[0];
@@ -155,9 +178,18 @@ export async function scrapePageText(
 ): Promise<string> {
   const manualAssisted = browserConfig?.manualAssisted ?? parseBooleanEnv(process.env['MANUAL_ASSISTED'], false);
   const persistentSession = browserConfig?.persistSession ?? isPersistentSessionEnabled();
-  const headless = browserConfig?.headless ?? (manualAssisted ? false : parseBooleanEnv(process.env['BROWSER_HEADLESS'], true));
-  const slowMoMs = browserConfig?.slowMoMs ?? Math.max(0, parseIntEnv(process.env['BROWSER_SLOW_MO_MS'], 0));
-  const keepOpenMs = browserConfig?.keepOpenMs ?? Math.max(0, parseIntEnv(process.env['BROWSER_KEEP_OPEN_MS'], 0));
+  const headlessEnvOverride = process.env['BROWSER_HEADLESS'] !== undefined
+    ? parseBooleanEnv(process.env['BROWSER_HEADLESS'], true)
+    : undefined;
+  const headless = manualAssisted ? false : (headlessEnvOverride ?? browserConfig?.headless ?? true);
+  const slowMoMsEnvOverride = process.env['BROWSER_SLOW_MO_MS'] !== undefined
+    ? Math.max(0, parseIntEnv(process.env['BROWSER_SLOW_MO_MS'], 0))
+    : undefined;
+  const slowMoMs = slowMoMsEnvOverride ?? browserConfig?.slowMoMs ?? 0;
+  const keepOpenMsEnvOverride = process.env['BROWSER_KEEP_OPEN_MS'] !== undefined
+    ? Math.max(0, parseIntEnv(process.env['BROWSER_KEEP_OPEN_MS'], 0))
+    : undefined;
+  const keepOpenMs = keepOpenMsEnvOverride ?? browserConfig?.keepOpenMs ?? 0;
   const gotoTimeoutMs = browserConfig?.gotoTimeoutMs ?? Math.max(10_000, parseIntEnv(process.env['BROWSER_GOTO_TIMEOUT_MS'], 60_000));
   const initialManualWaitMs =
     browserConfig?.manualAssistedInitialWaitMs ??
