@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Replace Playwright with Chrome Extension scraper** — Full plan saved at `~/.claude/plans/playwright-migrate-chrome-extension.md`. Goal: eliminate Playwright automation fingerprints by running scrapes inside the user's real Chrome via a Manifest V3 extension + Node.js WebSocket bridge. Key files: `src/page-adapter.ts` (new), `src/extension-bridge.ts` (new), `chrome-extension/` (new), `src/scraper.ts` (major rewrite), `src/plugin-types.ts`, `plugins/hermes/index.ts`, `src/config.ts`. Remove `playwright`, `playwright-extra`, `puppeteer-extra-plugin-stealth` deps; add `ws`.
 
+- **Turso DB support for multi-server, multi-site tracking** — Full plan saved at `~/.claude/plans/turso-db-support-for-multiservers.md`. Goal: track many URLs at once and run the agent on multiple machines (Windows/Linux/macOS) concurrently against shared data. Move sites/state/history/config from local JSON files into Turso (libSQL, remote-only cloud mode) as the single source of truth; add a per-site claim/lease so concurrent machines share work without duplicate Discord alerts. Key files: `src/db.ts` (new), `src/state.ts` (rewrite, async), `src/monitor-controller.ts` (rewrite, per-site loop), `src/config.ts`, `src/api.ts`, `src/api-types.ts`, `src/agent.ts`, `client/src/pages/MonitorPage.tsx`, `client/src/pages/ConfigPage.tsx`. Add `@libsql/client` dep; new env vars `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `MACHINE_ID`.
+
 ## Working conventions
 
 - **Never switch git branches without explicit confirmation from the user.**
