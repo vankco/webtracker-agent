@@ -3,7 +3,7 @@
  * All external I/O is mocked — no real network, browser, or LLM calls.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { createApiApp } from '../api.js';
 import { ConfigStore, loadAppConfigLenient } from '../config.js';
@@ -15,6 +15,12 @@ import type { SitePlugin } from '../plugin-types.js';
 // ---------------------------------------------------------------------------
 // Mock heavy dependencies so tests run fast & offline
 // ---------------------------------------------------------------------------
+
+beforeAll(() => {
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+});
 
 vi.mock('../scraper.js', () => ({
   scrapePageText: vi.fn().mockResolvedValue('scraped content'),
