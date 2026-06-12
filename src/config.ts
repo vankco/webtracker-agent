@@ -280,45 +280,48 @@ export function readJsonConfig(filePath = resolveConfigPath()): JsonConfig | nul
 function jsonToEnv(json: JsonConfig, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base };
 
-  if (json.targetUrl !== undefined)         env['TARGET_URL']              = json.targetUrl;
-  if (json.targetSelector !== undefined)    env['TARGET_SELECTOR']         = json.targetSelector;
-  if (json.checkIntervalMs !== undefined)   env['CHECK_INTERVAL_MS']       = String(json.checkIntervalMs);
-  if (json.runOnce !== undefined)           env['RUN_ONCE']                = String(json.runOnce);
-  if (json.discordWebhookUrl !== undefined) env['DISCORD_WEBHOOK_URL']     = json.discordWebhookUrl;
-  if (json.apiPort !== undefined)           env['API_PORT']                = String(json.apiPort);
-  if (json.plugins !== undefined)           env['PLUGINS']                 = json.plugins.join(',');
-  if (json.discordSystemWebhookUrl !== undefined) env['DISCORD_SYSTEM_WEBHOOK_URL'] = json.discordSystemWebhookUrl;
+  // config.json values are defaults — env vars already set in the shell take precedence.
+  const set = (key: string, value: string) => { if (env[key] === undefined) env[key] = value; };
+
+  if (json.targetUrl !== undefined)         set('TARGET_URL',              json.targetUrl);
+  if (json.targetSelector !== undefined)    set('TARGET_SELECTOR',         json.targetSelector);
+  if (json.checkIntervalMs !== undefined)   set('CHECK_INTERVAL_MS',       String(json.checkIntervalMs));
+  if (json.runOnce !== undefined)           set('RUN_ONCE',                String(json.runOnce));
+  if (json.discordWebhookUrl !== undefined) set('DISCORD_WEBHOOK_URL',     json.discordWebhookUrl);
+  if (json.apiPort !== undefined)           set('API_PORT',                String(json.apiPort));
+  if (json.plugins !== undefined)           set('PLUGINS',                 json.plugins.join(','));
+  if (json.discordSystemWebhookUrl !== undefined) set('DISCORD_SYSTEM_WEBHOOK_URL', json.discordSystemWebhookUrl);
 
   const g = json.llm?.gemini;
   if (g) {
-    if (g.enabled !== undefined)    env['LLM_GEMINI_ENABLED']     = String(g.enabled);
-    if (g.apiKey !== undefined)     env['GEMINI_API_KEY']          = g.apiKey;
-    if (g.model !== undefined)      env['LLM_GEMINI_MODEL']        = g.model;
-    if (g.priority !== undefined)   env['LLM_GEMINI_PRIORITY']     = String(g.priority);
-    if (g.timeoutMs !== undefined)  env['LLM_GEMINI_TIMEOUT_MS']   = String(g.timeoutMs);
-    if (g.maxRetries !== undefined) env['LLM_GEMINI_MAX_RETRIES']  = String(g.maxRetries);
+    if (g.enabled !== undefined)    set('LLM_GEMINI_ENABLED',     String(g.enabled));
+    if (g.apiKey !== undefined)     set('GEMINI_API_KEY',          g.apiKey);
+    if (g.model !== undefined)      set('LLM_GEMINI_MODEL',        g.model);
+    if (g.priority !== undefined)   set('LLM_GEMINI_PRIORITY',     String(g.priority));
+    if (g.timeoutMs !== undefined)  set('LLM_GEMINI_TIMEOUT_MS',   String(g.timeoutMs));
+    if (g.maxRetries !== undefined) set('LLM_GEMINI_MAX_RETRIES',  String(g.maxRetries));
   }
 
   const gr = json.llm?.groq;
   if (gr) {
-    if (gr.enabled !== undefined)    env['LLM_GROQ_ENABLED']     = String(gr.enabled);
-    if (gr.apiKey !== undefined)     env['GROQ_API_KEY']          = gr.apiKey;
-    if (gr.model !== undefined)      env['LLM_GROQ_MODEL']        = gr.model;
-    if (gr.priority !== undefined)   env['LLM_GROQ_PRIORITY']     = String(gr.priority);
-    if (gr.timeoutMs !== undefined)  env['LLM_GROQ_TIMEOUT_MS']   = String(gr.timeoutMs);
-    if (gr.maxRetries !== undefined) env['LLM_GROQ_MAX_RETRIES']  = String(gr.maxRetries);
+    if (gr.enabled !== undefined)    set('LLM_GROQ_ENABLED',     String(gr.enabled));
+    if (gr.apiKey !== undefined)     set('GROQ_API_KEY',          gr.apiKey);
+    if (gr.model !== undefined)      set('LLM_GROQ_MODEL',        gr.model);
+    if (gr.priority !== undefined)   set('LLM_GROQ_PRIORITY',     String(gr.priority));
+    if (gr.timeoutMs !== undefined)  set('LLM_GROQ_TIMEOUT_MS',   String(gr.timeoutMs));
+    if (gr.maxRetries !== undefined) set('LLM_GROQ_MAX_RETRIES',  String(gr.maxRetries));
   }
 
   const b = json.browser;
   if (b) {
-    if (b.headless !== undefined)                    env['BROWSER_HEADLESS']                      = String(b.headless);
-    if (b.persistSession !== undefined)              env['BROWSER_PERSIST_SESSION']               = String(b.persistSession);
-    if (b.userDataDir !== undefined)                 env['BROWSER_USER_DATA_DIR']                 = b.userDataDir;
-    if (b.gotoTimeoutMs !== undefined)               env['BROWSER_GOTO_TIMEOUT_MS']               = String(b.gotoTimeoutMs);
-    if (b.slowMoMs !== undefined)                    env['BROWSER_SLOW_MO_MS']                    = String(b.slowMoMs);
-    if (b.keepOpenMs !== undefined)                  env['BROWSER_KEEP_OPEN_MS']                  = String(b.keepOpenMs);
-    if (b.manualAssisted !== undefined)              env['MANUAL_ASSISTED']                       = String(b.manualAssisted);
-    if (b.manualAssistedInitialWaitMs !== undefined) env['MANUAL_ASSISTED_INITIAL_WAIT_MS']       = String(b.manualAssistedInitialWaitMs);
+    if (b.headless !== undefined)                    set('BROWSER_HEADLESS',                      String(b.headless));
+    if (b.persistSession !== undefined)              set('BROWSER_PERSIST_SESSION',               String(b.persistSession));
+    if (b.userDataDir !== undefined)                 set('BROWSER_USER_DATA_DIR',                 b.userDataDir);
+    if (b.gotoTimeoutMs !== undefined)               set('BROWSER_GOTO_TIMEOUT_MS',               String(b.gotoTimeoutMs));
+    if (b.slowMoMs !== undefined)                    set('BROWSER_SLOW_MO_MS',                    String(b.slowMoMs));
+    if (b.keepOpenMs !== undefined)                  set('BROWSER_KEEP_OPEN_MS',                  String(b.keepOpenMs));
+    if (b.manualAssisted !== undefined)              set('MANUAL_ASSISTED',                       String(b.manualAssisted));
+    if (b.manualAssistedInitialWaitMs !== undefined) set('MANUAL_ASSISTED_INITIAL_WAIT_MS',       String(b.manualAssistedInitialWaitMs));
   }
 
   return env;

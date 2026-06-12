@@ -99,6 +99,133 @@ async function scrollNaturally(page: Page): Promise<void> {
   }
 }
 
+async function saveDebugScreenshot(page: Page, label: string): Promise<void> {
+  try {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const path = join(process.cwd(), 'debug', `${label}-${ts}.png`);
+    mkdirSync(join(process.cwd(), 'debug'), { recursive: true });
+    await page.screenshot({ path, fullPage: false });
+    console.log(`[hermes:filter] screenshot → ${path}`);
+  } catch { /* non-fatal */ }
+}
+
+async function applyHermesFilter(page: Page): Promise<boolean> {
+  await saveDebugScreenshot(page, 'filter-01-start');
+
+  // Log bot challenge state so we can see what the page looks like on entry.
+  const botCheck = await page.evaluate(() => {
+    const dd = document.querySelector('div[id^="ddChallengeContainer"]') as HTMLElement | null;
+    return {
+      datadome: !!dd,
+      datadomeIframe: !!document.querySelector('iframe[src*="datadome"]'),
+      recaptcha: !!document.querySelector('iframe[src*="recaptcha"]'),
+      title: document.title,
+    };
+  });
+  console.log('[hermes:filter] bot-check:', JSON.stringify(botCheck));
+
+  // If DataDome overlay is present, disable its pointer interception.
+  if (botCheck.datadome) {
+    await page.evaluate(() => {
+      const el = document.querySelector('div[id^="ddChallengeContainer"]') as HTMLElement | null;
+      if (el) el.style.setProperty('pointer-events', 'none', 'important');
+    });
+    console.log('[hermes:filter] DataDome overlay disabled');
+  }
+
+  console.log('[hermes:filter] Looking for filter button...');
+  const filterBtn = page.locator('button[aria-controls="tray-grid-filters"]').first();
+  const filterBtnVisible = await filterBtn.isVisible({ timeout: 5_000 }).catch(() => false);
+  console.log(`[hermes:filter] Filter button visible: ${filterBtnVisible}`);
+
+  if (!filterBtnVisible) {
+    const allButtons = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('button')).map(b => ({
+        text: b.textContent?.trim().slice(0, 40),
+        ariaControls: b.getAttribute('aria-controls'),
+        ariaLabel: b.getAttribute('aria-label'),
+      })).filter(b => b.text || b.ariaLabel)
+    );
+    console.warn('[hermes:filter] Filter button not found. Buttons on page:', JSON.stringify(allButtons.slice(0, 15)));
+    await saveDebugHtml(page, 'filter-button-not-found');
+    return false;
+  }
+
+  await randomDelay(500, 1000);
+  await filterBtn.scrollIntoViewIfNeeded().catch(() => {});
+  await randomDelay(300, 600);
+  await filterBtn.click();
+  console.log('[hermes:filter] Filter button clicked');
+  await randomDelay(1500, 2500);
+  await saveDebugScreenshot(page, 'filter-02-after-click');
+
+  console.log('[hermes:filter] Waiting for filter tray to open...');
+  const tray = page.locator('div.tray-slide').first();
+  await tray.waitFor({ state: 'visible', timeout: 5_000 }).catch(async () => {
+    console.warn('[hermes:filter] Tray did not become visible in 5s');
+    await saveDebugHtml(page, 'filter-tray-not-visible');
+  });
+  const trayVisible = await tray.isVisible().catch(() => false);
+  console.log(`[hermes:filter] Tray visible: ${trayVisible}`);
+  await randomDelay(500, 1000);
+  await saveDebugScreenshot(page, 'filter-03-tray');
+
+  console.log('[hermes:filter] Looking for in-stock toggle...');
+  const toggle = page.locator('h-switch-button label.label-container').first();
+  const toggleVisible = await toggle.isVisible({ timeout: 3_000 }).catch(() => false);
+  console.log(`[hermes:filter] Toggle visible: ${toggleVisible}`);
+
+  if (!toggleVisible) {
+    const trayHtml = await tray.innerHTML().catch(() => '(error)');
+    console.warn('[hermes:filter] Toggle not visible. Tray HTML (500 chars):', trayHtml.slice(0, 500));
+    await saveDebugHtml(page, 'filter-toggle-not-visible');
+    return false;
+  }
+
+  await randomDelay(500, 1000);
+  await toggle.click({ timeout: 5_000 }).catch(async (e: unknown) => {
+    console.warn('[hermes:filter] Toggle click failed:', e instanceof Error ? e.message : e);
+    await saveDebugHtml(page, 'filter-toggle-click-failed');
+  });
+  console.log('[hermes:filter] Toggle clicked');
+  await randomDelay(1000, 1500);
+  await saveDebugScreenshot(page, 'filter-04-after-toggle');
+
+  console.log('[hermes:filter] Looking for Apply button...');
+  const applyBtn = page.locator('button[data-testid="Apply"]').first();
+  const applyVisible = await applyBtn.isVisible({ timeout: 3_000 }).catch(() => false);
+  console.log(`[hermes:filter] Apply button visible: ${applyVisible}`);
+
+  if (!applyVisible) {
+    const trayButtons = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('div.tray-slide button')).map(b => ({
+        text: b.textContent?.trim(),
+        testId: b.getAttribute('data-testid'),
+      }))
+    );
+    console.warn('[hermes:filter] Apply button not found. Tray buttons:', JSON.stringify(trayButtons));
+    await saveDebugHtml(page, 'filter-apply-not-visible');
+    return false;
+  }
+
+  await randomDelay(500, 1000);
+  await applyBtn.click({ timeout: 5_000 }).catch(async (e: unknown) => {
+    console.warn('[hermes:filter] Apply click failed:', e instanceof Error ? e.message : e);
+    await saveDebugHtml(page, 'filter-apply-click-failed');
+  });
+  console.log('[hermes:filter] Apply clicked — waiting for results...');
+  await randomDelay(1000, 2000);
+
+  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {
+    console.warn('[hermes:filter] networkidle timed out after Apply');
+  });
+  const countAfter = await page.$$eval('div.product-item', (els) => els.length).catch(() => 0);
+  console.log(`[hermes:filter] Products visible after filter: ${countAfter}`);
+  await saveDebugScreenshot(page, 'filter-05-done');
+
+  return true;
+}
+
 export async function extractHermesProducts(page: Page): Promise<HermesProduct[]> {
   // If the current URL has complex filter params (fh_location etc.), warm up the
   // SPA by loading the base URL first so the JS runtime is fully initialised,
@@ -125,6 +252,11 @@ export async function extractHermesProducts(page: Page): Promise<HermesProduct[]
   }
 
   await randomDelay(1500, 3000);
+
+  const filtered = await applyHermesFilter(page);
+  if (!filtered) {
+    console.warn('[hermes] Filter not applied — extracting all products (may include unavailable)');
+  }
 
   // Click "Load more items" until it disappears, scrolling naturally between clicks
   const LOAD_MORE = 'button.button-secondary:has-text("Load more")';
