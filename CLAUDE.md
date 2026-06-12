@@ -42,10 +42,12 @@ npx vitest run src/__tests__/api.test.ts
 
 # Typecheck
 npm run typecheck          # root
-npm run client:typecheck   # client
+npm run ui:typecheck       # UI (client/)
 
 # Debug modes (run in a real terminal, not background — require visible desktop)
-npm run watch-browser      # run once with visible browser, 250ms slow-mo
+npm run debug              # continuous headed browser + API on 3001, 250ms slow-mo
+npm run debug:once         # run once with visible browser, then exit
+npm run test:hermes        # standalone Hermes navigation test (scripts/test-hermes-simple.ts)
 npm run browser_mode       # persistent visible browser (for manual login)
 ```
 
