@@ -225,6 +225,18 @@ export type GetLogsResponse = LogEntry[];
 export type PredictResponse = PredictionResult;
 
 // ---------------------------------------------------------------------------
+// POST /api/ask
+// ---------------------------------------------------------------------------
+
+export interface AskRequest {
+  question: string;
+}
+
+export interface AskResponse {
+  answer: string;
+}
+
+// ---------------------------------------------------------------------------
 // POST /api/validate/scrape
 // ---------------------------------------------------------------------------
 

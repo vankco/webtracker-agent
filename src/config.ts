@@ -223,6 +223,12 @@ export interface JsonConfig {
   // System/debug channel — health monitor and warn/error log alerts go here.
   // Falls back to discordWebhookUrl if not set.
   discordSystemWebhookUrl?: string;
+
+  // Discord bot — read by discord-bot.ts only, never exposed via GET /api/config
+  discordBotToken?: string;
+  discordBotClientId?: string;
+  discordBotGuildId?: string;
+
   llm?: {
     gemini?: {
       enabled?: boolean;
@@ -291,6 +297,9 @@ function jsonToEnv(json: JsonConfig, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv
   if (json.apiPort !== undefined)           set('API_PORT',                String(json.apiPort));
   if (json.plugins !== undefined)           set('PLUGINS',                 json.plugins.join(','));
   if (json.discordSystemWebhookUrl !== undefined) set('DISCORD_SYSTEM_WEBHOOK_URL', json.discordSystemWebhookUrl);
+  if (json.discordBotToken !== undefined)    set('DISCORD_BOT_TOKEN',       json.discordBotToken);
+  if (json.discordBotClientId !== undefined) set('DISCORD_BOT_CLIENT_ID',   json.discordBotClientId);
+  if (json.discordBotGuildId !== undefined)  set('DISCORD_BOT_GUILD_ID',    json.discordBotGuildId);
 
   const g = json.llm?.gemini;
   if (g) {

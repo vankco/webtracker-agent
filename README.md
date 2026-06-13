@@ -104,6 +104,35 @@ npm start
 
 Real-time `warn`/`error` alerts are handled by the agent itself; the health monitor covers the cases the agent can't report on its own.
 
+### Discord bot
+
+`npm start` also launches `src/discord-bot.ts` as a **separate process** (run it alone with `npm run bot`). It connects to Discord via the Gateway and registers slash commands so anyone in your server can query the tracker in plain English.
+
+**Commands:**
+
+| Command | Access | Description |
+|---|---|---|
+| `/ask question:<text>` | public | Ask anything — "what's in stock today?", "which bag sells out fastest?", "any bags under $4k?" |
+| `/status` | admin only | Monitor health, last/next check time, and last result |
+| `/help` | public | List all commands |
+
+**Setup:**
+
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) → New Application → copy the **Application (Client) ID**
+2. Under **Bot** → Add Bot → copy the **token**. No privileged intents needed.
+3. Invite the bot via OAuth2 URL (scopes: `bot` + `applications.commands`; permission: Send Messages)
+4. Add to `config.json`:
+
+```json
+{
+  "discordBotToken": "YOUR_BOT_TOKEN",
+  "discordBotClientId": "YOUR_CLIENT_ID",
+  "discordBotGuildId": "YOUR_SERVER_ID"
+}
+```
+
+If no token is configured the bot process exits cleanly — `npm start` still works normally. The bot token is never exposed via `GET /api/config`.
+
 ### API only
 
 ```bash
@@ -176,6 +205,9 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 | `browser.userDataDir` | `.browser-profile` | Where browser session data is stored |
 | `plugins` | `[]` | List of site plugin package names to load |
 | `discordSystemWebhookUrl` | — | Webhook for system/debug alerts: health monitor (liveness, flapping) and warn/error log entries. Falls back to `discordWebhookUrl` if not set. |
+| `discordBotToken` | — | Discord bot token (optional; enables `/ask`, `/status`, `/help` slash commands) |
+| `discordBotClientId` | — | Discord application client ID (required with `discordBotToken`) |
+| `discordBotGuildId` | — | Discord server ID for slash command registration (required with `discordBotToken`) |
 
 ---
 
@@ -273,7 +305,7 @@ npm run test:coverage   # with coverage report (≥80% required)
 ```
 src/
   agent.ts              — entry point, starts API server or CLI loop
-  api.ts                — Express REST API (10 endpoints)
+  api.ts                — Express REST API (11 endpoints, incl. POST /api/ask)
   config.ts             — config loading (config.json → env → defaults)
   monitor-controller.ts — monitor loop lifecycle (start/stop/status)
   plugin-types.ts       — SitePlugin / PluginDiff interfaces
@@ -283,6 +315,10 @@ src/
   scraper.ts            — Playwright browser automation
   notifier.ts           — Discord webhook alerts
   state.ts              — persist last scrape to state.json
+  predictor.ts          — LLM-powered availability & price predictions
+  bot-qa.ts             — LLM-powered Q&A for the Discord bot
+  discord-bot.ts        — standalone Discord bot process
+  discord-bot-commands.ts — slash command definitions and reply formatters
   api-types.ts          — shared TypeScript types for the API
 
 plugins/
