@@ -281,7 +281,8 @@ export function readJsonConfig(filePath = resolveConfigPath()): JsonConfig | nul
 
 /**
  * Merges a JsonConfig onto a NodeJS.ProcessEnv-shaped object so the existing
- * env-based loaders can consume it transparently.  JSON values win over env.
+ * env-based loaders can consume it transparently.  config.json values act as
+ * defaults — any env var already set in the shell takes precedence.
  */
 function jsonToEnv(json: JsonConfig, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base };
@@ -389,8 +390,10 @@ export function saveJsonConfig(config: AppConfig, filePath = resolveConfigPath()
 }
 
 /**
- * Resolves the effective env: config.json values override process.env.
- * Falls back to process.env if no config.json is present.
+ * Resolves the effective env by layering config.json under process.env:
+ * shell env vars take precedence, and config.json only supplies values for
+ * keys the environment didn't set. Falls back to process.env if no
+ * config.json is present.
  */
 export function resolveEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   try {
