@@ -212,11 +212,10 @@ export class MonitorController {
       ...(plugin ? { totalProducts: currentProducts!.length, availableProducts: currentAvailable.length } : {}),
     });
 
-    // Record snapshot (newest first, keep last 2)
+    // Record snapshot (keep only the latest)
     this.recentSnapshots = [
       { fetchedAt: new Date().toISOString(), preview: currentContent.slice(0, 500), contentLength: currentContent.length },
-      ...this.recentSnapshots,
-    ].slice(0, 2);
+    ];
 
     if (!currentContent.trim()) {
       const msg = target.selector

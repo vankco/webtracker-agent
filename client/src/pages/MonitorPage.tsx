@@ -548,11 +548,11 @@ export function MonitorPage() {
         <Card>
           <CardHeader header={<Title3>Recent Fetched Content</Title3>} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
-            {status.recentSnapshots.map((snap: ContentSnapshot, i: number) => (
+            {status.recentSnapshots.slice(0, 1).map((snap: ContentSnapshot, i: number) => (
               <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: tokens.spacingHorizontalS }}>
                   <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>
-                    {i === 0 ? 'Latest' : 'Previous'} — {new Date(snap.fetchedAt).toLocaleTimeString()}
+                    Latest — {new Date(snap.fetchedAt).toLocaleTimeString()}
                   </Caption1>
                   <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>
                     {snap.contentLength.toLocaleString()} chars
