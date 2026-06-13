@@ -27,6 +27,7 @@
     "ui:prod": "cd client && npm run build",
     "ui:typecheck": "cd client && npm run typecheck",
     "dev:all": "concurrently -n api,ui -c cyan,magenta \"npm run api:dev\" \"npm run ui:dev\"",
+    "postinstall": "npm install --prefix client",
     "prepare": "husky"
   },
   "dependencies": {
@@ -48,7 +49,7 @@
     "@types/node": "^20.14.0",
     "@types/supertest": "^7.2.0",
     "@vitest/coverage-v8": "^4.1.7",
-    "concurrently": "^9.2.1",
+    "concurrently": "^10.0.3",
     "cross-env": "^10.1.0",
     "husky": "^9.1.7",
     "supertest": "^7.2.2",
