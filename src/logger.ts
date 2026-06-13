@@ -1,7 +1,8 @@
 /**
  * logger.ts
  * Persistent log buffer — entries survive restarts via logs.jsonl.
- * Keeps up to 2 weeks of history; trims older entries on startup.
+ * Keeps up to 3 days of history; trims older entries on startup and
+ * on a recurring interval so long-running processes stay bounded.
  */
 
 import * as fs from 'fs';
@@ -20,7 +21,8 @@ export interface LogEntry {
 }
 
 const LOG_FILE = path.resolve('logs.jsonl');
-const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+const RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
+const TRIM_INTERVAL_MS = 60 * 60 * 1000; // re-trim hourly while running
 
 let nextId = 1;
 const entries: LogEntry[] = [];
@@ -48,7 +50,7 @@ function appendToFile(entry: LogEntry): void {
 function loadFromFile(): LogEntry[] {
   if (!fs.existsSync(LOG_FILE)) return [];
   try {
-    const cutoff = new Date(Date.now() - TWO_WEEKS_MS).toISOString();
+    const cutoff = new Date(Date.now() - RETENTION_MS).toISOString();
     const lines = fs.readFileSync(LOG_FILE, 'utf-8').split('\n').filter(Boolean);
     const recent = lines
       .map(l => { try { return JSON.parse(l) as LogEntry; } catch { return null; } })
@@ -61,7 +63,7 @@ function loadFromFile(): LogEntry[] {
 
 function trimFile(): void {
   try {
-    const cutoff = new Date(Date.now() - TWO_WEEKS_MS).toISOString();
+    const cutoff = new Date(Date.now() - RETENTION_MS).toISOString();
     const lines = fs.readFileSync(LOG_FILE, 'utf-8').split('\n').filter(Boolean);
     const recent = lines.filter(l => {
       try { return (JSON.parse(l) as LogEntry).timestamp >= cutoff; } catch { return false; }
@@ -70,6 +72,14 @@ function trimFile(): void {
   } catch {
     // Non-fatal.
   }
+}
+
+/** Drop in-memory entries older than the retention window. */
+function trimMemory(): void {
+  const cutoff = new Date(Date.now() - RETENTION_MS).toISOString();
+  let drop = 0;
+  while (drop < entries.length && entries[drop].timestamp < cutoff) drop++;
+  if (drop > 0) entries.splice(0, drop);
 }
 
 // ---------------------------------------------------------------------------
@@ -83,6 +93,13 @@ function trimFile(): void {
     entries.push(...loaded);
     nextId = Math.max(...loaded.map(e => e.id)) + 1;
   }
+
+  // Re-trim periodically so a long-running process stays bounded.
+  // unref() keeps this timer from holding the process (or tests) open.
+  setInterval(() => {
+    trimMemory();
+    trimFile();
+  }, TRIM_INTERVAL_MS).unref();
 })();
 
 // ---------------------------------------------------------------------------
