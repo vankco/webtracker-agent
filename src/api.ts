@@ -21,7 +21,7 @@ import {
 import { MonitorController } from './monitor-controller.js';
 import { getLogs, clearLogs } from './logger.js';
 import { defaultLlmAnalyzer } from './llm.js';
-import { getErrorMessage } from './utils.js';
+import { getErrorMessage, recentHistory } from './utils.js';
 import { scrapePageText } from './scraper.js';
 import { loadState } from './state.js';
 import { predictAvailability } from './predictor.js';
@@ -433,7 +433,7 @@ export function createApiRouter(
       plugin && state?.lastProducts ? plugin.productsToText(state.lastProducts) : '';
     const historyText =
       plugin?.formatHistoryForPrediction && state?.history
-        ? plugin.formatHistoryForPrediction(state.history)
+        ? plugin.formatHistoryForPrediction(recentHistory(state.history))
         : '';
 
     try {
@@ -513,7 +513,7 @@ export function createApiRouter(
     }
 
     try {
-      const historyText = plugin.formatHistoryForPrediction(history);
+      const historyText = plugin.formatHistoryForPrediction(recentHistory(history));
       const result = await predictor(url, historyText, providers, history.length);
       ok(res, result);
     } catch (err) {

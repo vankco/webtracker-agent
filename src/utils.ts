@@ -3,6 +3,14 @@ export function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** Max history entries sent to an LLM — bounds prompt size / per-token cost. */
+export const MAX_LLM_HISTORY = 50;
+
+/** Returns the most recent `max` history entries (caps LLM prompt size). */
+export function recentHistory<T>(history: T[], max = MAX_LLM_HISTORY): T[] {
+  return history.length > max ? history.slice(-max) : history;
+}
+
 export function parseBooleanEnv(value: string | undefined, defaultValue: boolean): boolean {
   if (value == null) return defaultValue;
   const normalized = value.trim().toLowerCase();
