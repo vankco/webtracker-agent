@@ -9,7 +9,7 @@ AI-powered website change monitor. Watches a page for meaningful changes and sen
 1. Playwright scrapes the target page on a schedule
 2. If the content changed:
    - **Plugin URL** — if a site plugin matches the target URL, it runs a deterministic structured diff (no LLM needed). Added, removed, and changed items are identified and sent directly to Discord.
-   - **All other URLs** — the old and new content are sent to an LLM (Gemini or Groq) for analysis. The LLM decides if the change is meaningful and writes a summary.
+   - **All other URLs** — the old and new content are sent to an LLM (Gemini, Groq, or Claude) for analysis. The LLM decides if the change is meaningful and writes a summary.
 3. A Discord alert is sent with the result
 4. If all LLM providers fail, a local text-diff fallback is used (generic sites only)
 5. On first run with no prior state, plugins send a baseline alert listing all currently tracked items
@@ -22,6 +22,7 @@ AI-powered website change monitor. Watches a page for meaningful changes and sen
 - Node.js 20+
 - A [Gemini API key](https://aistudio.google.com/app/apikey) (free tier available)
 - A [Groq API key](https://console.groq.com) (optional, used as failover)
+- An [Anthropic API key](https://console.anthropic.com) (optional — to use Claude as a provider)
 - A Discord webhook URL
 
 ---
@@ -62,6 +63,14 @@ Create `config.json` in the project root with your values:
       "apiKey": "",
       "model": "llama-3.3-70b-versatile",
       "priority": 2,
+      "timeoutMs": 30000,
+      "maxRetries": 1
+    },
+    "claude": {
+      "enabled": false,
+      "apiKey": "",
+      "model": "claude-haiku-4-5",
+      "priority": 3,
       "timeoutMs": 30000,
       "maxRetries": 1
     }
@@ -107,9 +116,9 @@ tsx src/agent.ts --help      # list every flag
 Precedence is **CLI flags > config.json**. There are no shell environment
 variables. Booleans accept `--flag` (true), `--flag=false`, or `--no-flag`.
 
-**Secrets are not flags** — `geminiApiKey`, `groqApiKey`, `discordBotToken`,
-`discordWebhookUrl` and `discordSystemWebhookUrl` are set in `config.json`
-(or via the UI) only.
+**Secrets are not flags** — `geminiApiKey`, `groqApiKey`, `anthropicApiKey`,
+`discordBotToken`, `discordWebhookUrl` and `discordSystemWebhookUrl` are set in
+`config.json` (or via the UI) only.
 
 ### Health monitor
 
@@ -216,6 +225,7 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 | `apiPort` | `3001` | Port for the REST API server |
 | `llm.gemini.priority` | `1` | Lower = tried first |
 | `llm.groq.priority` | `2` | Used as failover when Gemini fails |
+| `llm.claude.priority` | `3` | Anthropic Claude (default model `claude-haiku-4-5`) |
 | `browser.headless` | `true` | Run browser without a visible window |
 | `browser.persistSession` | `true` | Reuse cookies/login state between runs |
 | `browser.userDataDir` | `.browser-profile` | Where browser session data is stored |
@@ -269,7 +279,8 @@ Providers are tried in priority order (lowest number first):
 
 1. Gemini is called
 2. If Gemini fails (bad key, timeout, quota) → Groq is tried
-3. If all providers fail → local text-diff fallback is used (no LLM call)
+3. If Groq fails → Claude is tried
+4. If all providers fail → local text-diff fallback is used (no LLM call)
 
 The fallback always produces a result — the monitor never crashes due to LLM failure.
 
