@@ -30,7 +30,7 @@ import {
   ReOrderDotsVerticalRegular,
 } from '@fluentui/react-icons';
 import { api, ApiError } from '../api/client.js';
-import type { SafeLlmProviderConfig, ProviderModels, ProviderUpdate, ModelEntry } from '../api/types.js';
+import type { SafeLlmProviderConfig, ProviderModels, ProviderUpdate, ModelEntry, LlmProviderId } from '../api/types.js';
 
 const useStyles = makeStyles({
   root: {
@@ -127,6 +127,7 @@ const useStyles = makeStyles({
 const PROVIDER_DISPLAY: Record<string, string> = {
   gemini: 'Google Gemini',
   groq: 'Groq',
+  claude: 'Anthropic Claude',
 };
 
 interface TestState {
@@ -198,7 +199,7 @@ export function ProvidersPage() {
     setEditError(null);
     try {
       const update: ProviderUpdate = {
-        id: id as 'gemini' | 'groq',
+        id: id as LlmProviderId,
         model: editDraft.model,
         priority: Math.max(1, parseInt(editDraft.priority, 10) || 1),
         timeoutMs: Math.max(1000, (parseInt(editDraft.timeoutSeconds, 10) || 30) * 1000),
@@ -221,7 +222,7 @@ export function ProvidersPage() {
   async function handleToggle(id: string, enabled: boolean) {
     try {
       const updated = await api.providers.update({
-        providers: [{ id: id as 'gemini' | 'groq', enabled }],
+        providers: [{ id: id as LlmProviderId, enabled }],
       });
       setProviders(updated.slice().sort((a, b) => a.priority - b.priority));
     } catch (err) {
@@ -232,7 +233,7 @@ export function ProvidersPage() {
   async function handleTest(id: string) {
     setTestStates((prev) => ({ ...prev, [id]: { loading: true } }));
     try {
-      const result = await api.providers.test({ providerId: id as 'gemini' | 'groq' });
+      const result = await api.providers.test({ providerId: id as LlmProviderId });
       setTestStates((prev) => ({
         ...prev,
         [id]: { loading: false, success: result.success, latencyMs: result.latencyMs, error: result.error, result: result.result },
@@ -274,7 +275,7 @@ export function ProvidersPage() {
     dragSaving.current = true;
     try {
       const updated = await api.providers.update({
-        providers: withNewPriorities.map((p) => ({ id: p.id as 'gemini' | 'groq', priority: p.priority })),
+        providers: withNewPriorities.map((p) => ({ id: p.id as LlmProviderId, priority: p.priority })),
       });
       setProviders(updated.slice().sort((a, b) => a.priority - b.priority));
     } catch (err) {

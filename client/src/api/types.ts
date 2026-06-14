@@ -3,7 +3,7 @@
  * Copied here so the client workspace is self-contained.
  */
 
-export type LlmProviderId = 'gemini' | 'groq';
+export type LlmProviderId = 'gemini' | 'groq' | 'claude';
 
 // ---------------------------------------------------------------------------
 // Envelope
