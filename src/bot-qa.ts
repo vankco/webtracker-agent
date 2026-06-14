@@ -7,7 +7,9 @@
 
 import { GoogleGenAI } from '@google/genai';
 import Groq from 'groq-sdk';
+import Anthropic from '@anthropic-ai/sdk';
 import type { LlmProviderConfig } from './config.js';
+import { claudeText } from './llm.js';
 
 export const QA_SYSTEM_PROMPT =
   `You are a helpful assistant for a product availability tracker. ` +
@@ -65,6 +67,24 @@ async function askWithGroq(prompt: string, provider: LlmProviderConfig): Promise
   return raw;
 }
 
+async function askWithClaude(prompt: string, provider: LlmProviderConfig): Promise<string> {
+  if (!provider.apiKey) throw new Error('Claude provider has no API key configured.');
+  const client = new Anthropic({
+    apiKey: provider.apiKey,
+    timeout: provider.timeoutMs,
+    maxRetries: provider.maxRetries,
+  });
+  const message = await client.messages.create({
+    model: provider.model,
+    max_tokens: 1024,
+    system: QA_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  const raw = claudeText(message);
+  if (!raw) throw new Error('Empty Claude response.');
+  return raw;
+}
+
 /** Runs the question through enabled providers in priority order. Throws if all fail. */
 export async function answerQuestion(
   prompt: string,
@@ -75,6 +95,7 @@ export async function answerQuestion(
     try {
       if (provider.id === 'gemini') return await askWithGemini(prompt, provider);
       if (provider.id === 'groq') return await askWithGroq(prompt, provider);
+      if (provider.id === 'claude') return await askWithClaude(prompt, provider);
       throw new Error(`Provider '${provider.id}' not supported.`);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);

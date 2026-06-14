@@ -8,7 +8,9 @@
 
 import { GoogleGenAI } from '@google/genai';
 import Groq from 'groq-sdk';
+import Anthropic from '@anthropic-ai/sdk';
 import type { LlmProviderConfig } from './config.js';
+import { claudeText } from './llm.js';
 import { log } from './logger.js';
 import { parseLlmJson, tryEachProvider } from './utils.js';
 
@@ -96,6 +98,28 @@ async function predictWithGroq(
   return parsePrediction(raw);
 }
 
+async function predictWithClaude(
+  url: string,
+  historyText: string,
+  provider: LlmProviderConfig
+): Promise<RawPrediction> {
+  if (!provider.apiKey) throw new Error('Claude provider has no API key configured.');
+  const client = new Anthropic({
+    apiKey: provider.apiKey,
+    timeout: provider.timeoutMs,
+    maxRetries: provider.maxRetries,
+  });
+  const message = await client.messages.create({
+    model: provider.model,
+    max_tokens: 2048,
+    system: PREDICTION_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: buildPredictionPrompt(url, historyText) }],
+  });
+  const raw = claudeText(message);
+  if (!raw) throw new Error('Empty Claude response.');
+  return parsePrediction(raw);
+}
+
 /**
  * Runs prediction through enabled providers in priority order.
  * Throws if every provider fails (no local fallback for predictions).
@@ -113,6 +137,7 @@ export async function predictAvailability(
     (p) => {
       if (p.id === 'gemini') return predictWithGemini(url, historyText, p);
       if (p.id === 'groq') return predictWithGroq(url, historyText, p);
+      if (p.id === 'claude') return predictWithClaude(url, historyText, p);
       throw new Error(`Provider '${p.id}' not supported for prediction.`);
     },
     ({ providerId, reason }) => {

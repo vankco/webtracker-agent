@@ -1,4 +1,5 @@
 import Groq from 'groq-sdk';
+import Anthropic from '@anthropic-ai/sdk';
 import {
   analyzeChanges,
   localFallbackAnalysis,
@@ -8,6 +9,15 @@ import {
 } from './analyzer.js';
 import type { LlmProviderConfig } from './config.js';
 import { parseLlmJson, tryEachProvider } from './utils.js';
+
+/** Concatenates the text blocks of an Anthropic message response. */
+export function claudeText(message: Anthropic.Message): string {
+  return message.content
+    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+    .map((b) => b.text)
+    .join('')
+    .trim();
+}
 
 export interface AnalysisResultWithMeta extends AnalysisResult {
   /** Which provider produced this result (undefined = local fallback). */
@@ -70,6 +80,43 @@ async function analyzeWithGroq(
 }
 
 // ---------------------------------------------------------------------------
+// Claude (Anthropic) adapter helpers
+// ---------------------------------------------------------------------------
+
+async function analyzeWithClaude(
+  url: string,
+  oldContent: string,
+  newContent: string,
+  provider: LlmProviderConfig
+): Promise<AnalysisResult> {
+  if (!provider.apiKey) {
+    throw new Error('Claude provider is enabled but has no API key configured.');
+  }
+
+  const client = new Anthropic({
+    apiKey: provider.apiKey,
+    timeout: provider.timeoutMs,
+    maxRetries: provider.maxRetries,
+  });
+
+  // No thinking/effort/sampling params: Haiku 4.5 rejects effort/thinking, and
+  // omitting temperature/top_p keeps this forward-compatible with Opus models.
+  const message = await client.messages.create({
+    model: provider.model,
+    max_tokens: 1024,
+    system: MONITOR_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: buildMonitorUserPrompt(url, oldContent, newContent) }],
+  });
+
+  const raw = claudeText(message);
+  if (!raw) {
+    throw new Error('Empty Claude response.');
+  }
+
+  return parseLlmJson<AnalysisResult>(raw);
+}
+
+// ---------------------------------------------------------------------------
 // Default multi-provider LLM analyzer
 // ---------------------------------------------------------------------------
 
@@ -84,6 +131,10 @@ export const defaultLlmAnalyzer: LlmAnalyzer = {
 
     if (provider.id === 'groq') {
       return analyzeWithGroq(url, oldContent, newContent, provider);
+    }
+
+    if (provider.id === 'claude') {
+      return analyzeWithClaude(url, oldContent, newContent, provider);
     }
 
     throw new Error(`Provider '${provider.id}' adapter is not implemented.`);
