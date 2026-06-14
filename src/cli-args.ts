@@ -22,7 +22,7 @@ export class CliError extends Error {
 
 type OptType = 'bool' | 'int' | 'string';
 
-type OptGroup = 'Core' | 'Schedule' | 'Discord' | 'Gemini' | 'Groq' | 'Browser';
+type OptGroup = 'Core' | 'Schedule' | 'Discord' | 'Gemini' | 'Groq' | 'Claude' | 'Browser';
 
 interface CliOption {
   flag: string; // '--apiPort'
@@ -46,6 +46,13 @@ function groq(cfg: Partial<JsonConfig>): NonNullable<NonNullable<JsonConfig['llm
   cfg.llm ??= {};
   cfg.llm.groq ??= {};
   return cfg.llm.groq;
+}
+
+/** Ensures cfg.llm.claude exists and returns it. */
+function claude(cfg: Partial<JsonConfig>): NonNullable<NonNullable<JsonConfig['llm']>['claude']> {
+  cfg.llm ??= {};
+  cfg.llm.claude ??= {};
+  return cfg.llm.claude;
 }
 
 /** Ensures cfg.browser exists and returns it. */
@@ -101,6 +108,18 @@ const OPTIONS: CliOption[] = [
     apply: (c, v) => { groq(c).timeoutMs = v as number; } },
   { flag: '--groqMaxRetries', type: 'int', group: 'Groq', desc: 'Max retries on failure', valueHint: '<n>',
     apply: (c, v) => { groq(c).maxRetries = v as number; } },
+
+  // Claude (apiKey is a secret, config.json only)
+  { flag: '--claudeEnabled', type: 'bool', group: 'Claude', desc: 'Enable the Claude (Anthropic) provider',
+    apply: (c, v) => { claude(c).enabled = v as boolean; } },
+  { flag: '--claudeModel', type: 'string', group: 'Claude', desc: 'Claude model id', valueHint: '<model>',
+    apply: (c, v) => { claude(c).model = v as string; } },
+  { flag: '--claudePriority', type: 'int', group: 'Claude', desc: 'Provider priority (lower = first)', valueHint: '<n>',
+    apply: (c, v) => { claude(c).priority = v as number; } },
+  { flag: '--claudeTimeoutMs', type: 'int', group: 'Claude', desc: 'Request timeout (ms)', valueHint: '<ms>',
+    apply: (c, v) => { claude(c).timeoutMs = v as number; } },
+  { flag: '--claudeMaxRetries', type: 'int', group: 'Claude', desc: 'Max retries on failure', valueHint: '<n>',
+    apply: (c, v) => { claude(c).maxRetries = v as number; } },
 
   // Browser
   { flag: '--browserHeadless', type: 'bool', group: 'Browser', desc: 'Run browser headless (use =false for headed)',
@@ -227,7 +246,7 @@ export function formatHelp(): string {
   lines.push('Usage: tsx src/agent.ts [options]');
   lines.push('');
 
-  const groupsOrder: OptGroup[] = ['Core', 'Schedule', 'Discord', 'Gemini', 'Groq', 'Browser'];
+  const groupsOrder: OptGroup[] = ['Core', 'Schedule', 'Discord', 'Gemini', 'Groq', 'Claude', 'Browser'];
 
   // Column width across all flags (with value hints) for alignment.
   const flagCol = (o: CliOption) => `${o.flag}${o.valueHint ? ` ${o.valueHint}` : ''}`;
@@ -246,8 +265,9 @@ export function formatHelp(): string {
   lines.push('  --help, -h               Show this help');
   lines.push('  --version, -v            Show version');
   lines.push('');
-  lines.push('Secrets are NOT flags — set geminiApiKey, groqApiKey, discordBotToken,');
-  lines.push('discordWebhookUrl and discordSystemWebhookUrl in config.json (or via the UI).');
+  lines.push('Secrets are NOT flags — set geminiApiKey, groqApiKey, anthropicApiKey,');
+  lines.push('discordBotToken, discordWebhookUrl and discordSystemWebhookUrl in config.json');
+  lines.push('(or via the UI).');
 
   return lines.join('\n');
 }

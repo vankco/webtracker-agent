@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-export type LlmProviderId = 'gemini' | 'groq';
+export type LlmProviderId = 'gemini' | 'groq' | 'claude';
 
 export interface LlmProviderConfig {
   id: LlmProviderId;
@@ -94,7 +94,19 @@ function parseProviderConfig(json: JsonConfig): LlmProviderConfig[] {
     maxRetries: Math.max(0, gr.maxRetries ?? 1),
   };
 
-  return [gemini, groq];
+  const c = json.llm?.claude ?? {};
+  const claudeApiKey = c.apiKey;
+  const claude: LlmProviderConfig = {
+    id: 'claude',
+    enabled: c.enabled ?? Boolean(claudeApiKey),
+    priority: Math.max(1, c.priority ?? 3),
+    model: (c.model || 'claude-haiku-4-5').trim(),
+    apiKey: claudeApiKey,
+    timeoutMs: Math.max(1_000, c.timeoutMs ?? 30_000),
+    maxRetries: Math.max(0, c.maxRetries ?? 1),
+  };
+
+  return [gemini, groq, claude];
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +151,14 @@ export const KNOWN_PROVIDER_MODELS: Record<
       { id: 'allam-2-7b',                                  tier: 'free' },
     ],
     default: 'llama-3.3-70b-versatile',
+  },
+  claude: {
+    models: [
+      { id: 'claude-haiku-4-5',  tier: 'paid' },
+      { id: 'claude-sonnet-4-6', tier: 'paid' },
+      { id: 'claude-opus-4-8',   tier: 'paid' },
+    ],
+    default: 'claude-haiku-4-5',
   },
 };
 
@@ -238,6 +258,14 @@ export interface JsonConfig {
       timeoutMs?: number;
       maxRetries?: number;
     };
+    claude?: {
+      enabled?: boolean;
+      apiKey?: string;
+      model?: string;
+      priority?: number;
+      timeoutMs?: number;
+      maxRetries?: number;
+    };
   };
 
   browser?: {
@@ -289,6 +317,9 @@ export function mergeConfig(json: JsonConfig | null, cli: Partial<JsonConfig>): 
     if (base.llm?.groq || cli.llm?.groq) {
       merged.llm.groq = { ...base.llm?.groq, ...cli.llm?.groq };
     }
+    if (base.llm?.claude || cli.llm?.claude) {
+      merged.llm.claude = { ...base.llm?.claude, ...cli.llm?.claude };
+    }
   }
 
   if (base.browser || cli.browser) {
@@ -306,6 +337,7 @@ export function mergeConfig(json: JsonConfig | null, cli: Partial<JsonConfig>): 
 export function saveJsonConfig(config: AppConfig, filePath = resolveConfigPath()): void {
   const gemini = config.llmProviders.find((p) => p.id === 'gemini');
   const groq   = config.llmProviders.find((p) => p.id === 'groq');
+  const claude = config.llmProviders.find((p) => p.id === 'claude');
 
   const json: JsonConfig = {
     targetUrl:          config.target.url,
@@ -331,6 +363,14 @@ export function saveJsonConfig(config: AppConfig, filePath = resolveConfigPath()
         priority:   groq.priority,
         timeoutMs:  groq.timeoutMs,
         maxRetries: groq.maxRetries,
+      } : undefined,
+      claude: claude ? {
+        enabled:    claude.enabled,
+        apiKey:     claude.apiKey,
+        model:      claude.model,
+        priority:   claude.priority,
+        timeoutMs:  claude.timeoutMs,
+        maxRetries: claude.maxRetries,
       } : undefined,
     },
 
