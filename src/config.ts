@@ -301,7 +301,7 @@ export function mergeConfig(json: JsonConfig | null, cli: Partial<JsonConfig>): 
 /**
  * Converts a live AppConfig back into the JsonConfig shape and writes it to
  * config.json.  Called after every API mutation so the file stays in sync.
- * No-ops silently if the file doesn't exist yet (env-var-only setups).
+ * Always writes the file (creating it if absent).
  */
 export function saveJsonConfig(config: AppConfig, filePath = resolveConfigPath()): void {
   const gemini = config.llmProviders.find((p) => p.id === 'gemini');
