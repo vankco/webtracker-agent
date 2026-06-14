@@ -93,7 +93,7 @@ async function main(): Promise<void> {
 
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-  client.once('ready', (c) => {
+  client.once('clientReady', (c) => {
     console.log(`[discord-bot] Logged in as ${c.user.tag}`);
   });
 
