@@ -8,8 +8,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // ---------------------------------------------------------------------------
 // Hoist mock handles so they're available inside vi.mock factory (which is hoisted)
 // ---------------------------------------------------------------------------
-const { mockGroqCreate } = vi.hoisted(() => ({
+const { mockGroqCreate, mockAnthropicCreate } = vi.hoisted(() => ({
   mockGroqCreate: vi.fn(),
+  mockAnthropicCreate: vi.fn(),
 }));
 
 vi.mock('groq-sdk', () => ({
@@ -21,6 +22,14 @@ vi.mock('groq-sdk', () => ({
         create: mockGroqCreate,
       },
     };
+  },
+}));
+
+vi.mock('@anthropic-ai/sdk', () => ({
+  default: class MockAnthropic {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(_opts: any) {}
+    messages = { create: mockAnthropicCreate };
   },
 }));
 
@@ -43,15 +52,21 @@ import type { LlmProviderConfig } from '../config.js';
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+const DEFAULT_MODEL: Record<LlmProviderConfig['id'], string> = {
+  gemini: 'gemini-2.5-flash',
+  groq: 'llama-3.3-70b-versatile',
+  claude: 'claude-haiku-4-5',
+};
+
 function makeProvider(
-  id: 'gemini' | 'groq',
+  id: LlmProviderConfig['id'],
   overrides: Partial<LlmProviderConfig> = {}
 ): LlmProviderConfig {
   return {
     id,
     enabled: true,
     priority: 1,
-    model: id === 'gemini' ? 'gemini-2.5-flash' : 'llama-3.3-70b-versatile',
+    model: DEFAULT_MODEL[id],
     apiKey: 'test-key',
     timeoutMs: 5_000,
     maxRetries: 0,
@@ -61,6 +76,10 @@ function makeProvider(
 
 function groqResponse(content: string) {
   return { choices: [{ message: { content } }] };
+}
+
+function claudeResponse(text: string) {
+  return { content: [{ type: 'text', text }] };
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +183,48 @@ describe('defaultLlmAnalyzer — Groq path', () => {
     await expect(
       defaultLlmAnalyzer.analyze('https://site.com', 'old', 'new', unknownProvider)
     ).rejects.toThrow('not implemented');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// defaultLlmAnalyzer.analyze — Claude path
+// ---------------------------------------------------------------------------
+describe('defaultLlmAnalyzer — Claude path', () => {
+  beforeEach(() => {
+    mockAnthropicCreate.mockReset();
+  });
+
+  it('parses JSON from concatenated Claude text blocks', async () => {
+    mockAnthropicCreate.mockResolvedValue(claudeResponse('{"changed": true, "summary": "Restocked."}'));
+    const result = await defaultLlmAnalyzer.analyze(
+      'https://shop.com', 'sold out', 'in stock', makeProvider('claude')
+    );
+    expect(result.changed).toBe(true);
+    expect(result.summary).toBe('Restocked.');
+  });
+
+  it('sends model/system and no thinking or sampling params', async () => {
+    mockAnthropicCreate.mockResolvedValue(claudeResponse('{"changed": false, "summary": "No change."}'));
+    await defaultLlmAnalyzer.analyze('https://x.com', 'a', 'b', makeProvider('claude', { model: 'claude-sonnet-4-6' }));
+    const arg = mockAnthropicCreate.mock.calls[0][0];
+    expect(arg.model).toBe('claude-sonnet-4-6');
+    expect(arg.system).toBeTruthy();
+    expect(arg).not.toHaveProperty('thinking');
+    expect(arg).not.toHaveProperty('temperature');
+  });
+
+  it('throws when Claude provider has no API key', async () => {
+    const provider = makeProvider('claude', { apiKey: undefined });
+    await expect(
+      defaultLlmAnalyzer.analyze('https://site.com', 'old', 'new', provider)
+    ).rejects.toThrow('API key');
+  });
+
+  it('throws when Claude returns empty content', async () => {
+    mockAnthropicCreate.mockResolvedValue(claudeResponse(''));
+    await expect(
+      defaultLlmAnalyzer.analyze('https://site.com', 'old', 'new', makeProvider('claude'))
+    ).rejects.toThrow('Empty Claude response');
   });
 });
 

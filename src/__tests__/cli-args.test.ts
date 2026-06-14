@@ -59,6 +59,27 @@ describe('parseCliArgs — flag forms', () => {
     expect(config.browser?.slowMoMs).toBe(250);
   });
 
+  it('routes claude flags into llm.claude', () => {
+    const { config } = parseCliArgs([
+      '--claudeEnabled',
+      '--claudeModel', 'claude-sonnet-4-6',
+      '--claudePriority', '3',
+      '--claudeTimeoutMs', '20000',
+      '--claudeMaxRetries', '2',
+    ]);
+    expect(config.llm?.claude).toEqual({
+      enabled: true,
+      model: 'claude-sonnet-4-6',
+      priority: 3,
+      timeoutMs: 20000,
+      maxRetries: 2,
+    });
+  });
+
+  it('has no --claudeApiKey flag (secret stays config.json-only)', () => {
+    expect(() => parseCliArgs(['--claudeApiKey', 'sk-ant'])).toThrow(CliError);
+  });
+
   it('sets help / version flags', () => {
     expect(parseCliArgs(['--help']).help).toBe(true);
     expect(parseCliArgs(['-h']).help).toBe(true);
@@ -155,7 +176,7 @@ describe('formatHelp', () => {
   const help = formatHelp();
 
   it('lists every option group', () => {
-    for (const group of ['Core:', 'Schedule:', 'Discord:', 'Gemini:', 'Groq:', 'Browser:']) {
+    for (const group of ['Core:', 'Schedule:', 'Discord:', 'Gemini:', 'Groq:', 'Claude:', 'Browser:']) {
       expect(help).toContain(group);
     }
   });
@@ -174,6 +195,7 @@ describe('formatHelp', () => {
   it('notes that secrets live in config.json', () => {
     expect(help).toContain('config.json');
     expect(help).toMatch(/geminiApiKey|discordBotToken/);
+    expect(help).toContain('anthropicApiKey');
   });
 });
 
@@ -215,6 +237,16 @@ describe('mergeConfig — precedence & deep-merge', () => {
     expect(merged.llm?.gemini?.apiKey).toBe('secret');
     expect(merged.llm?.gemini?.enabled).toBe(true);
     expect(merged.llm?.gemini?.model).toBe('gemini-2.5-pro');
+  });
+
+  it('deep-merges llm.claude so --claudeModel keeps the persisted apiKey', () => {
+    const merged = mergeConfig(
+      { llm: { claude: { apiKey: 'sk-ant', enabled: true } } },
+      { llm: { claude: { model: 'claude-sonnet-4-6' } } },
+    );
+    expect(merged.llm?.claude?.apiKey).toBe('sk-ant');
+    expect(merged.llm?.claude?.enabled).toBe(true);
+    expect(merged.llm?.claude?.model).toBe('claude-sonnet-4-6');
   });
 
   it('handles a null config.json (CLI-only)', () => {

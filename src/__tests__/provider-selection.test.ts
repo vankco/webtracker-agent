@@ -16,15 +16,21 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
+const DEFAULT_MODEL: Record<LlmProviderConfig['id'], string> = {
+  gemini: 'gemini-2.5-flash',
+  groq: 'llama-3.3-70b-versatile',
+  claude: 'claude-haiku-4-5',
+};
+
 function makeProvider(
-  id: 'gemini' | 'groq',
+  id: LlmProviderConfig['id'],
   overrides: Partial<LlmProviderConfig> = {}
 ): LlmProviderConfig {
   return {
     id,
     enabled: true,
     priority: 1,
-    model: id === 'gemini' ? 'gemini-2.5-flash' : 'llama-3.3-70b-versatile',
+    model: DEFAULT_MODEL[id],
     apiKey: 'test-key',
     timeoutMs: 30_000,
     maxRetries: 1,
@@ -222,5 +228,25 @@ describe('loadAppConfigLenient', () => {
     const gemini = config.llmProviders.find((p) => p.id === 'gemini');
     expect(gemini?.enabled).toBe(true);
     expect(gemini?.apiKey).toBe('my-key');
+  });
+
+  it('parses all three providers in gemini→groq→claude order', () => {
+    const ids = loadAppConfigLenient({}).llmProviders.map((p) => p.id);
+    expect(ids).toEqual(['gemini', 'groq', 'claude']);
+  });
+
+  it('defaults Claude to claude-haiku-4-5, priority 3, disabled without a key', () => {
+    const claude = loadAppConfigLenient({}).llmProviders.find((p) => p.id === 'claude');
+    expect(claude?.model).toBe('claude-haiku-4-5');
+    expect(claude?.priority).toBe(3);
+    expect(claude?.enabled).toBe(false);
+  });
+
+  it('enables Claude when an API key is present and respects a model override', () => {
+    const config = loadAppConfigLenient({ llm: { claude: { apiKey: 'sk-ant', model: 'claude-sonnet-4-6' } } });
+    const claude = config.llmProviders.find((p) => p.id === 'claude');
+    expect(claude?.enabled).toBe(true);
+    expect(claude?.apiKey).toBe('sk-ant');
+    expect(claude?.model).toBe('claude-sonnet-4-6');
   });
 });
