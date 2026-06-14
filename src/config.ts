@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { parseBooleanEnv, parseIntEnv, getErrorMessage } from './utils.js';
 
 export type LlmProviderId = 'gemini' | 'groq';
 
@@ -67,39 +66,32 @@ export interface SafeAppConfig extends Omit<AppConfig, 'llmProviders'> {
 }
 
 // ---------------------------------------------------------------------------
-// Internal helpers
+// Internal helpers — build typed AppConfig sections from a typed JsonConfig.
 // ---------------------------------------------------------------------------
 
-function requireEnv(key: string, env: NodeJS.ProcessEnv): string {
-  const value = env[key];
-  if (!value) {
-    throw new Error(`Missing required env variable: ${key}`);
-  }
-  return value;
-}
-
-function parseProviderConfig(env: NodeJS.ProcessEnv): LlmProviderConfig[] {
-  const geminiApiKey = env['GEMINI_API_KEY'];
-  const geminiEnabledByDefault = Boolean(geminiApiKey);
+function parseProviderConfig(json: JsonConfig): LlmProviderConfig[] {
+  const g = json.llm?.gemini ?? {};
+  const geminiApiKey = g.apiKey;
   const gemini: LlmProviderConfig = {
     id: 'gemini',
-    enabled: parseBooleanEnv(env['LLM_GEMINI_ENABLED'], geminiEnabledByDefault),
-    priority: Math.max(1, parseIntEnv(env['LLM_GEMINI_PRIORITY'], 1)),
-    model: (env['LLM_GEMINI_MODEL'] || 'gemini-2.5-flash').trim(),
+    enabled: g.enabled ?? Boolean(geminiApiKey),
+    priority: Math.max(1, g.priority ?? 1),
+    model: (g.model || 'gemini-2.5-flash').trim(),
     apiKey: geminiApiKey,
-    timeoutMs: Math.max(1_000, parseIntEnv(env['LLM_GEMINI_TIMEOUT_MS'], 30_000)),
-    maxRetries: Math.max(0, parseIntEnv(env['LLM_GEMINI_MAX_RETRIES'], 1)),
+    timeoutMs: Math.max(1_000, g.timeoutMs ?? 30_000),
+    maxRetries: Math.max(0, g.maxRetries ?? 1),
   };
 
-  const groqApiKey = env['GROQ_API_KEY'];
+  const gr = json.llm?.groq ?? {};
+  const groqApiKey = gr.apiKey;
   const groq: LlmProviderConfig = {
     id: 'groq',
-    enabled: parseBooleanEnv(env['LLM_GROQ_ENABLED'], false),
-    priority: Math.max(1, parseIntEnv(env['LLM_GROQ_PRIORITY'], 2)),
-    model: (env['LLM_GROQ_MODEL'] || 'llama-3.3-70b-versatile').trim(),
+    enabled: gr.enabled ?? false,
+    priority: Math.max(1, gr.priority ?? 2),
+    model: (gr.model || 'llama-3.3-70b-versatile').trim(),
     apiKey: groqApiKey,
-    timeoutMs: Math.max(1_000, parseIntEnv(env['LLM_GROQ_TIMEOUT_MS'], 30_000)),
-    maxRetries: Math.max(0, parseIntEnv(env['LLM_GROQ_MAX_RETRIES'], 1)),
+    timeoutMs: Math.max(1_000, gr.timeoutMs ?? 30_000),
+    maxRetries: Math.max(0, gr.maxRetries ?? 1),
   };
 
   return [gemini, groq];
@@ -184,10 +176,10 @@ export function validateAppConfig(config: AppConfig): string[] {
   const errors: string[] = [];
 
   if (!config.target.url.trim()) {
-    errors.push('target.url (TARGET_URL) is required');
+    errors.push('targetUrl is required (set --targetUrl or targetUrl in config.json)');
   }
   if (!config.notifications.discordWebhookUrl.trim()) {
-    errors.push('notifications.discordWebhookUrl (DISCORD_WEBHOOK_URL) is required');
+    errors.push('discordWebhookUrl is required (set it in config.json)');
   }
 
   const enabled = getEnabledProvidersByPriority(config);
@@ -280,61 +272,30 @@ export function readJsonConfig(filePath = resolveConfigPath()): JsonConfig | nul
 }
 
 /**
- * Merges a JsonConfig onto a NodeJS.ProcessEnv-shaped object so the existing
- * env-based loaders can consume it transparently.  config.json values act as
- * defaults — any env var already set in the shell takes precedence.
+ * Merges CLI flags onto config.json. CLI flags win. Top-level fields are
+ * overwritten; the nested `llm.gemini`, `llm.groq` and `browser` objects are
+ * deep-merged so a single CLI flag (e.g. --geminiModel) doesn't wipe sibling
+ * fields persisted in config.json (e.g. geminiApiKey).
  */
-function jsonToEnv(json: JsonConfig, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...base };
+export function mergeConfig(json: JsonConfig | null, cli: Partial<JsonConfig>): JsonConfig {
+  const base: JsonConfig = json ?? {};
+  const merged: JsonConfig = { ...base, ...cli };
 
-  // config.json values are defaults — env vars already set in the shell take precedence.
-  const set = (key: string, value: string) => { if (env[key] === undefined) env[key] = value; };
-
-  if (json.targetUrl !== undefined)         set('TARGET_URL',              json.targetUrl);
-  if (json.targetSelector !== undefined)    set('TARGET_SELECTOR',         json.targetSelector);
-  if (json.checkIntervalMs !== undefined)   set('CHECK_INTERVAL_MS',       String(json.checkIntervalMs));
-  if (json.runOnce !== undefined)           set('RUN_ONCE',                String(json.runOnce));
-  if (json.discordWebhookUrl !== undefined) set('DISCORD_WEBHOOK_URL',     json.discordWebhookUrl);
-  if (json.apiPort !== undefined)           set('API_PORT',                String(json.apiPort));
-  if (json.plugins !== undefined)           set('PLUGINS',                 json.plugins.join(','));
-  if (json.discordSystemWebhookUrl !== undefined) set('DISCORD_SYSTEM_WEBHOOK_URL', json.discordSystemWebhookUrl);
-  if (json.discordBotToken !== undefined)    set('DISCORD_BOT_TOKEN',       json.discordBotToken);
-  if (json.discordBotClientId !== undefined) set('DISCORD_BOT_CLIENT_ID',   json.discordBotClientId);
-  if (json.discordBotGuildId !== undefined)  set('DISCORD_BOT_GUILD_ID',    json.discordBotGuildId);
-
-  const g = json.llm?.gemini;
-  if (g) {
-    if (g.enabled !== undefined)    set('LLM_GEMINI_ENABLED',     String(g.enabled));
-    if (g.apiKey !== undefined)     set('GEMINI_API_KEY',          g.apiKey);
-    if (g.model !== undefined)      set('LLM_GEMINI_MODEL',        g.model);
-    if (g.priority !== undefined)   set('LLM_GEMINI_PRIORITY',     String(g.priority));
-    if (g.timeoutMs !== undefined)  set('LLM_GEMINI_TIMEOUT_MS',   String(g.timeoutMs));
-    if (g.maxRetries !== undefined) set('LLM_GEMINI_MAX_RETRIES',  String(g.maxRetries));
+  if (base.llm || cli.llm) {
+    merged.llm = { ...base.llm, ...cli.llm };
+    if (base.llm?.gemini || cli.llm?.gemini) {
+      merged.llm.gemini = { ...base.llm?.gemini, ...cli.llm?.gemini };
+    }
+    if (base.llm?.groq || cli.llm?.groq) {
+      merged.llm.groq = { ...base.llm?.groq, ...cli.llm?.groq };
+    }
   }
 
-  const gr = json.llm?.groq;
-  if (gr) {
-    if (gr.enabled !== undefined)    set('LLM_GROQ_ENABLED',     String(gr.enabled));
-    if (gr.apiKey !== undefined)     set('GROQ_API_KEY',          gr.apiKey);
-    if (gr.model !== undefined)      set('LLM_GROQ_MODEL',        gr.model);
-    if (gr.priority !== undefined)   set('LLM_GROQ_PRIORITY',     String(gr.priority));
-    if (gr.timeoutMs !== undefined)  set('LLM_GROQ_TIMEOUT_MS',   String(gr.timeoutMs));
-    if (gr.maxRetries !== undefined) set('LLM_GROQ_MAX_RETRIES',  String(gr.maxRetries));
+  if (base.browser || cli.browser) {
+    merged.browser = { ...base.browser, ...cli.browser };
   }
 
-  const b = json.browser;
-  if (b) {
-    if (b.headless !== undefined)                    set('BROWSER_HEADLESS',                      String(b.headless));
-    if (b.persistSession !== undefined)              set('BROWSER_PERSIST_SESSION',               String(b.persistSession));
-    if (b.userDataDir !== undefined)                 set('BROWSER_USER_DATA_DIR',                 b.userDataDir);
-    if (b.gotoTimeoutMs !== undefined)               set('BROWSER_GOTO_TIMEOUT_MS',               String(b.gotoTimeoutMs));
-    if (b.slowMoMs !== undefined)                    set('BROWSER_SLOW_MO_MS',                    String(b.slowMoMs));
-    if (b.keepOpenMs !== undefined)                  set('BROWSER_KEEP_OPEN_MS',                  String(b.keepOpenMs));
-    if (b.manualAssisted !== undefined)              set('MANUAL_ASSISTED',                       String(b.manualAssisted));
-    if (b.manualAssistedInitialWaitMs !== undefined) set('MANUAL_ASSISTED_INITIAL_WAIT_MS',       String(b.manualAssistedInitialWaitMs));
-  }
-
-  return env;
+  return merged;
 }
 
 /**
@@ -389,107 +350,77 @@ export function saveJsonConfig(config: AppConfig, filePath = resolveConfigPath()
   fs.writeFileSync(filePath, JSON.stringify(json, null, 2), 'utf-8');
 }
 
-/**
- * Resolves the effective env by layering config.json under process.env:
- * shell env vars take precedence, and config.json only supplies values for
- * keys the environment didn't set. Falls back to process.env if no
- * config.json is present.
- */
-export function resolveEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  try {
-    const json = readJsonConfig();
-    if (json) {
-      console.log(`[config] Loaded config.json`);
-      return jsonToEnv(json, base);
-    }
-  } catch (err) {
-    console.warn(`[config] Failed to parse config.json: ${getErrorMessage(err)}. Falling back to env.`);
-  }
-  return base;
-}
-
 // ---------------------------------------------------------------------------
-// Shared env-to-config builders (used by both loaders below)
+// Typed config builders (consume a JsonConfig, no env layer)
 // ---------------------------------------------------------------------------
 
-function buildBrowserConfig(env: NodeJS.ProcessEnv): BrowserConfig {
-  const manualAssisted = parseBooleanEnv(env['MANUAL_ASSISTED'], false);
-  const persistSession = manualAssisted || parseBooleanEnv(env['BROWSER_PERSIST_SESSION'], true);
+function buildBrowserConfig(b: NonNullable<JsonConfig['browser']> = {}): BrowserConfig {
+  const manualAssisted = b.manualAssisted ?? false;
+  const persistSession = manualAssisted || (b.persistSession ?? true);
   return {
     manualAssisted,
-    manualAssistedInitialWaitMs: Math.max(0, parseIntEnv(env['MANUAL_ASSISTED_INITIAL_WAIT_MS'], 120_000)),
+    manualAssistedInitialWaitMs: Math.max(0, b.manualAssistedInitialWaitMs ?? 120_000),
     persistSession,
-    headless: manualAssisted ? false : parseBooleanEnv(env['BROWSER_HEADLESS'], true),
-    slowMoMs: Math.max(0, parseIntEnv(env['BROWSER_SLOW_MO_MS'], 0)),
-    keepOpenMs: Math.max(0, parseIntEnv(env['BROWSER_KEEP_OPEN_MS'], 0)),
-    gotoTimeoutMs: Math.max(10_000, parseIntEnv(env['BROWSER_GOTO_TIMEOUT_MS'], 60_000)),
-    userDataDir: env['BROWSER_USER_DATA_DIR'] || '.browser-profile',
+    headless: manualAssisted ? false : (b.headless ?? true),
+    slowMoMs: Math.max(0, b.slowMoMs ?? 0),
+    keepOpenMs: Math.max(0, b.keepOpenMs ?? 0),
+    gotoTimeoutMs: Math.max(10_000, b.gotoTimeoutMs ?? 60_000),
+    userDataDir: b.userDataDir || '.browser-profile',
   };
 }
 
-function buildScheduleConfig(env: NodeJS.ProcessEnv): ScheduleConfig {
+function buildScheduleConfig(json: JsonConfig): ScheduleConfig {
   return {
-    intervalMs: Math.max(1_000, parseIntEnv(env['CHECK_INTERVAL_MS'], 300_000)),
-    runOnce: parseBooleanEnv(env['RUN_ONCE'], false),
+    intervalMs: Math.max(1_000, json.checkIntervalMs ?? 300_000),
+    runOnce: json.runOnce ?? false,
   };
 }
 
-function buildPlugins(env: NodeJS.ProcessEnv): string[] {
-  return env['PLUGINS'] ? env['PLUGINS'].split(',').map(s => s.trim()).filter(Boolean) : [];
-}
-
 // ---------------------------------------------------------------------------
-// Strict config loader (existing behaviour — throws on invalid)
+// Typed AppConfig builder
 // ---------------------------------------------------------------------------
 
-export function loadAppConfig(env: NodeJS.ProcessEnv = resolveEnv()): AppConfig {
+/**
+ * Builds a validated AppConfig from a typed JsonConfig (already merged from
+ * config.json + CLI flags). In strict mode (CLI entry-point) it throws when
+ * required fields (targetUrl, discordWebhookUrl) are missing; lenient mode
+ * (API-server entry-point) defaults missing fields to empty strings so the
+ * user can finish configuration via the UI.
+ */
+export function buildAppConfig(input: JsonConfig, opts: { strict?: boolean } = {}): AppConfig {
   const config: AppConfig = {
     target: {
-      url: requireEnv('TARGET_URL', env),
-      selector: env['TARGET_SELECTOR'] ?? '',
+      url: input.targetUrl ?? '',
+      selector: input.targetSelector ?? '',
     },
-    schedule: buildScheduleConfig(env),
-    browser: buildBrowserConfig(env),
+    schedule: buildScheduleConfig(input),
+    browser: buildBrowserConfig(input.browser),
     notifications: {
-      discordWebhookUrl: requireEnv('DISCORD_WEBHOOK_URL', env),
-      discordSystemWebhookUrl: env['DISCORD_SYSTEM_WEBHOOK_URL'] ?? '',
+      discordWebhookUrl: input.discordWebhookUrl ?? '',
+      discordSystemWebhookUrl: input.discordSystemWebhookUrl ?? '',
     },
-    llmProviders: parseProviderConfig(env),
-    plugins: buildPlugins(env),
+    llmProviders: parseProviderConfig(input),
+    plugins: input.plugins ?? [],
   };
 
-  const errors = validateAppConfig(config);
-  if (errors.length > 0) {
-    throw new Error(errors.join('; '));
+  if (opts.strict) {
+    const errors = validateAppConfig(config);
+    if (errors.length > 0) {
+      throw new Error(errors.join('; '));
+    }
   }
 
   return config;
 }
 
-// ---------------------------------------------------------------------------
-// Lenient config loader (API-server mode — no throws for missing fields)
-// ---------------------------------------------------------------------------
+/** Strict load — throws on missing required fields. Used by CLI mode. */
+export function loadAppConfig(input: JsonConfig): AppConfig {
+  return buildAppConfig(input, { strict: true });
+}
 
-/**
- * Loads config from env without requiring TARGET_URL / DISCORD_WEBHOOK_URL.
- * Missing fields default to empty string.  Used when the API server is the
- * primary entry-point and the user will configure fields via the API.
- */
-export function loadAppConfigLenient(env: NodeJS.ProcessEnv = resolveEnv()): AppConfig {
-  return {
-    target: {
-      url: env['TARGET_URL'] ?? '',
-      selector: env['TARGET_SELECTOR'] ?? '',
-    },
-    schedule: buildScheduleConfig(env),
-    browser: buildBrowserConfig(env),
-    notifications: {
-      discordWebhookUrl: env['DISCORD_WEBHOOK_URL'] ?? '',
-      discordSystemWebhookUrl: env['DISCORD_SYSTEM_WEBHOOK_URL'] ?? '',
-    },
-    llmProviders: parseProviderConfig(env),
-    plugins: buildPlugins(env),
-  };
+/** Lenient load — never throws; missing fields default to empty. Used by API mode. */
+export function loadAppConfigLenient(input: JsonConfig = {}): AppConfig {
+  return buildAppConfig(input);
 }
 
 // ---------------------------------------------------------------------------

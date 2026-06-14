@@ -95,6 +95,22 @@ npm start
 - A standalone health-monitor process also starts (see below)
 - If `config.json` is fully configured, the monitor starts automatically
 
+### Configuration: config.json + CLI flags
+
+Operational settings can be passed as **CLI flags**, which override `config.json`:
+
+```bash
+tsx src/agent.ts --apiPort 3001 --browserHeadless=false --browserSlowMoMs 250
+tsx src/agent.ts --help      # list every flag
+```
+
+Precedence is **CLI flags > config.json**. There are no shell environment
+variables. Booleans accept `--flag` (true), `--flag=false`, or `--no-flag`.
+
+**Secrets are not flags** — `geminiApiKey`, `groqApiKey`, `discordBotToken`,
+`discordWebhookUrl` and `discordSystemWebhookUrl` are set in `config.json`
+(or via the UI) only.
+
 ### Health monitor
 
 `npm start` also launches `src/health-monitor.ts` as a **separate process** (run it alone with `npm run monitor`). Because it runs independently of the agent, it can detect when the agent itself goes down. Every 5 minutes it sends Discord alerts for:
@@ -306,7 +322,8 @@ npm run test:coverage   # with coverage report (≥80% required)
 src/
   agent.ts              — entry point, starts API server or CLI loop
   api.ts                — Express REST API (11 endpoints, incl. POST /api/ask)
-  config.ts             — config loading (config.json → env → defaults)
+  cli-args.ts           — CLI flag parser + --help (typed, no env layer)
+  config.ts             — config building (CLI flags > config.json → defaults)
   monitor-controller.ts — monitor loop lifecycle (start/stop/status)
   plugin-types.ts       — SitePlugin / PluginDiff interfaces
   plugin-registry.ts    — plugin loader and registry

@@ -27,13 +27,12 @@ import { setAlertCallback } from '../logger.js';
 // ---------------------------------------------------------------------------
 function makeFullConfig() {
   return loadAppConfigLenient({
-    TARGET_URL: 'https://e2e.example.com',
-    DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/e2e',
-    GEMINI_API_KEY: 'gemini-key',
-    LLM_GEMINI_ENABLED: 'true',
-    GROQ_API_KEY: 'groq-key',
-    LLM_GROQ_ENABLED: 'true',
-    LLM_GROQ_PRIORITY: '2',
+    targetUrl: 'https://e2e.example.com',
+    discordWebhookUrl: 'https://discord.com/api/webhooks/e2e',
+    llm: {
+      gemini: { apiKey: 'gemini-key', enabled: true },
+      groq: { apiKey: 'groq-key', enabled: true, priority: 2 },
+    },
   });
 }
 
@@ -377,10 +376,9 @@ describe('E2E: Hermès deterministic change detection', () => {
 
   function makeHermesConfig() {
     return loadAppConfigLenient({
-      TARGET_URL: HERMES_URL,
-      DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/hermes-test',
-      GEMINI_API_KEY: 'gemini-key',
-      LLM_GEMINI_ENABLED: 'true',
+      targetUrl: HERMES_URL,
+      discordWebhookUrl: 'https://discord.com/api/webhooks/hermes-test',
+      llm: { gemini: { apiKey: 'gemini-key', enabled: true } },
     });
   }
 

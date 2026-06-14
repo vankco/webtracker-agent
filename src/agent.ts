@@ -1,19 +1,19 @@
-import 'dotenv/config';
 import {
   loadAppConfig,
   loadAppConfigLenient,
-  resolveEnv,
+  mergeConfig,
+  readJsonConfig,
   ConfigStore,
   getEnabledProvidersByPriority,
   type LlmProviderConfig,
 } from './config.js';
+import { parseCliArgs, formatHelp, getVersion, CliError } from './cli-args.js';
 import { MonitorController } from './monitor-controller.js';
 import { startApiServer } from './api.js';
 import { loadPlugins } from './plugin-registry.js';
 import { setAlertCallback } from './logger.js';
 import { sendDiscordAlert } from './notifier.js';
 import type { LogEntry } from './logger.js';
-import { parseIntEnv } from './utils.js';
 
 // ---------------------------------------------------------------------------
 // Main
@@ -33,18 +33,22 @@ function registerDiscordAlerts(getWebhookUrl: () => string): void {
 }
 
 async function main(): Promise<void> {
-  const apiPortRaw = process.env['API_PORT'];
-  const apiPort = apiPortRaw ? parseIntEnv(apiPortRaw, 0) : 0;
+  const { config: cli, help, version } = parseCliArgs();
+  if (help)    { console.log(formatHelp()); return; }
+  if (version) { console.log(getVersion()); return; }
+
+  const merged = mergeConfig(readJsonConfig(), cli);
+  const apiPort = merged.apiPort ?? 0;
   const apiMode = apiPort > 0;
 
   if (apiMode) {
     // -------------------------------------------------------------------
     // API-server mode:
-    //   1. Load config leniently (missing TARGET_URL / Discord URL are OK).
+    //   1. Load config leniently (missing targetUrl / Discord URL are OK).
     //   2. Start the Express API server — UI/operator configures via REST.
     //   3. Do NOT auto-start the monitor loop; POST /api/monitor/start does it.
     // -------------------------------------------------------------------
-    const initial = loadAppConfigLenient(resolveEnv());
+    const initial = loadAppConfigLenient(merged);
     const configStore = new ConfigStore(initial);
     const registry = await loadPlugins(initial.plugins);
     const monitorController = new MonitorController({}, registry);
@@ -52,10 +56,10 @@ async function main(): Promise<void> {
     const enabledProviders = getEnabledProvidersByPriority(initial);
     if (enabledProviders.length > 0) {
       console.log(
-        `[agent] LLM providers (from env): ${enabledProviders.map((p: LlmProviderConfig) => `${p.id}:${p.model}`).join(', ')}`
+        `[agent] LLM providers: ${enabledProviders.map((p: LlmProviderConfig) => `${p.id}:${p.model}`).join(', ')}`
       );
     } else {
-      console.log('[agent] No LLM providers configured from env — configure via API.');
+      console.log('[agent] No LLM providers configured — configure via config.json or the UI.');
     }
 
     startApiServer(configStore, monitorController, apiPort);
@@ -74,10 +78,9 @@ async function main(): Promise<void> {
     }
   } else {
     // -------------------------------------------------------------------
-    // Classic CLI mode (backward-compatible):
-    //   Strict config load → immediate monitor loop.
+    // CLI mode (no --apiPort): strict config load → immediate monitor loop.
     // -------------------------------------------------------------------
-    const config = loadAppConfig(resolveEnv());
+    const config = loadAppConfig(merged);
     const enabledProviders = getEnabledProvidersByPriority(config)
       .map((p: LlmProviderConfig) => `${p.id}:${p.model}`)
       .join(', ');
@@ -108,6 +111,11 @@ function registerSignalHandlers(monitorController: MonitorController): void {
 }
 
 main().catch((err: unknown) => {
+  if (err instanceof CliError) {
+    console.error(err.message);
+    console.error('Run with --help to see available flags.');
+    process.exit(2);
+  }
   console.error('[agent] Fatal error:', err);
   process.exitCode = 1;
 });
