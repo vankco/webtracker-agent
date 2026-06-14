@@ -111,14 +111,14 @@ describe('validateAppConfig', () => {
     const config = makeConfig([makeProvider('gemini')]);
     config.target.url = '';
     const errors = validateAppConfig(config);
-    expect(errors.some((e) => e.includes('TARGET_URL'))).toBe(true);
+    expect(errors.some((e) => e.includes('targetUrl'))).toBe(true);
   });
 
   it('reports missing Discord webhook URL', () => {
     const config = makeConfig([makeProvider('gemini')]);
     config.notifications.discordWebhookUrl = '';
     const errors = validateAppConfig(config);
-    expect(errors.some((e) => e.includes('DISCORD_WEBHOOK_URL'))).toBe(true);
+    expect(errors.some((e) => e.includes('discordWebhookUrl'))).toBe(true);
   });
 
   it('reports no enabled providers', () => {
@@ -203,22 +203,22 @@ describe('ConfigStore', () => {
 // ---------------------------------------------------------------------------
 
 describe('loadAppConfigLenient', () => {
-  it('does not throw when required env vars are missing', () => {
+  it('does not throw when required fields are missing', () => {
     expect(() => loadAppConfigLenient({})).not.toThrow();
   });
 
-  it('uses empty string for missing TARGET_URL', () => {
+  it('uses empty string for missing targetUrl', () => {
     const config = loadAppConfigLenient({});
     expect(config.target.url).toBe('');
   });
 
-  it('reads TARGET_URL when present', () => {
-    const config = loadAppConfigLenient({ TARGET_URL: 'https://foo.com' });
+  it('reads targetUrl when present', () => {
+    const config = loadAppConfigLenient({ targetUrl: 'https://foo.com' });
     expect(config.target.url).toBe('https://foo.com');
   });
 
-  it('enables Gemini when GEMINI_API_KEY is present', () => {
-    const config = loadAppConfigLenient({ GEMINI_API_KEY: 'my-key' });
+  it('enables Gemini when an API key is present', () => {
+    const config = loadAppConfigLenient({ llm: { gemini: { apiKey: 'my-key' } } });
     const gemini = config.llmProviders.find((p) => p.id === 'gemini');
     expect(gemini?.enabled).toBe(true);
     expect(gemini?.apiKey).toBe('my-key');

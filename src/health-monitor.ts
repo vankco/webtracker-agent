@@ -10,14 +10,15 @@
  * Start with:  npm run monitor   (also launched alongside the app by `npm start`)
  */
 
-import 'dotenv/config';
-import { resolveEnv } from './config.js';
+import { buildAppConfig, mergeConfig, readJsonConfig } from './config.js';
+import { parseCliArgs } from './cli-args.js';
 import { getErrorMessage } from './utils.js';
 
-const env = resolveEnv();
-const PORT = env['API_PORT'] || '3001';
+const merged = mergeConfig(readJsonConfig(), parseCliArgs().config);
+const cfg = buildAppConfig(merged);
+const PORT = merged.apiPort ?? 3001;
 const BASE = `http://localhost:${PORT}/api`;
-const WEBHOOK = env['DISCORD_SYSTEM_WEBHOOK_URL'] || env['DISCORD_WEBHOOK_URL'] || '';
+const WEBHOOK = cfg.notifications.discordSystemWebhookUrl || cfg.notifications.discordWebhookUrl || '';
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 const FLAP_COOLDOWN_MS = 60 * 60 * 1000; // alert on flapping at most once/hour

@@ -53,10 +53,9 @@ vi.mock('../state.js', () => ({
 function makeFullConfig() {
   return {
     ...loadAppConfigLenient({
-      TARGET_URL: 'https://example.com',
-      DISCORD_WEBHOOK_URL: 'https://discord.com/api/webhooks/test',
-      GEMINI_API_KEY: 'test-gemini-key',
-      LLM_GEMINI_ENABLED: 'true',
+      targetUrl: 'https://example.com',
+      discordWebhookUrl: 'https://discord.com/api/webhooks/test',
+      llm: { gemini: { apiKey: 'test-gemini-key', enabled: true } },
     }),
   };
 }

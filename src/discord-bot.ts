@@ -12,7 +12,6 @@
  *   discordBotGuildId    / DISCORD_BOT_GUILD_ID
  */
 
-import 'dotenv/config';
 import {
   Client,
   GatewayIntentBits,
@@ -21,7 +20,8 @@ import {
   PermissionFlagsBits,
   type ChatInputCommandInteraction,
 } from 'discord.js';
-import { resolveEnv } from './config.js';
+import { mergeConfig, readJsonConfig } from './config.js';
+import { parseCliArgs } from './cli-args.js';
 import {
   requiresAdmin,
   slashCommandDefinitions,
@@ -32,12 +32,14 @@ import {
 } from './discord-bot-commands.js';
 import type { MonitorStatus } from './api-types.js';
 
-const env = resolveEnv();
-const PORT = env['API_PORT'] || '3001';
+// Bot credentials/IDs live in config.json (token is a secret — never a flag);
+// client/guild IDs may also be passed as CLI flags. apiPort selects the API port.
+const merged = mergeConfig(readJsonConfig(), parseCliArgs().config);
+const PORT = merged.apiPort ?? 3001;
 const BASE = `http://localhost:${PORT}/api`;
-const TOKEN = env['DISCORD_BOT_TOKEN'] ?? '';
-const CLIENT_ID = env['DISCORD_BOT_CLIENT_ID'] ?? '';
-const GUILD_ID = env['DISCORD_BOT_GUILD_ID'] ?? '';
+const TOKEN = merged.discordBotToken ?? '';
+const CLIENT_ID = merged.discordBotClientId ?? '';
+const GUILD_ID = merged.discordBotGuildId ?? '';
 
 async function handleHelp(interaction: ChatInputCommandInteraction): Promise<void> {
   await interaction.reply({ content: formatHelpReply() });
@@ -91,7 +93,7 @@ async function main(): Promise<void> {
 
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-  client.once('ready', (c) => {
+  client.once('clientReady', (c) => {
     console.log(`[discord-bot] Logged in as ${c.user.tag}`);
   });
 

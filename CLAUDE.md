@@ -29,8 +29,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm install
 
 # Start full app (API + UI + health monitor + discord bot)
-npm start                  # Linux/Mac
-# On Windows, npm start uses cross-env — works on both platforms
+npm start
 
 # Stop the app (cross-platform)
 npm stop
@@ -55,18 +54,24 @@ npm run debug              # continuous headed browser + API on 3001, 250ms slow
 npm run debug:once         # run once with visible browser, then exit
 npm run test:hermes        # standalone Hermes navigation test (scripts/test-hermes-simple.ts)
 npm run browser_mode       # persistent visible browser (for manual login)
+
+# See every CLI flag
+npx tsx src/agent.ts --help
 ```
 
-> **Windows note:** `npm start` uses `cross-env`. The old `set VAR=val&&` syntax in some scripts is Windows-only and was replaced. `npm stop` uses `scripts/stop.mjs` (cross-platform Node.js).
+> **No shell env vars.** Operational settings are passed as CLI flags
+> (e.g. `tsx src/agent.ts --apiPort 3001 --browserHeadless=false`); secrets
+> (API keys, Discord bot token, webhook URLs) live in `config.json` only.
+> `npm stop` uses `scripts/stop.mjs` (cross-platform Node.js).
 
 ## Architecture
 
 ### Two runtime modes
 
-`src/agent.ts` is the entry point and branches on `API_PORT`:
+`src/agent.ts` is the entry point and branches on the `--apiPort` flag:
 
-- **API mode** (`API_PORT=3001` set): starts Express API + auto-starts monitor if config is valid. This is the normal `npm start` path.
-- **CLI mode** (no `API_PORT`): strict config load → immediate monitor loop. Used by `watch-browser` and `browser_mode`.
+- **API mode** (`--apiPort 3001`): starts Express API + auto-starts monitor if config is valid. This is the normal `npm start` path.
+- **CLI mode** (no `--apiPort`): strict config load → immediate monitor loop. Used by `debug:once`, `watch-browser`, and `browser_mode`.
 
 ### Core pipeline
 
@@ -91,9 +96,17 @@ Plugins are npm workspaces under `plugins/*` and loaded by `src/plugin-registry.
 
 ### Config
 
-`src/config.ts` is the single source of truth. `config.json` in the project root (gitignored) is loaded on startup. The `ConfigStore` class holds live config and is mutated by REST API calls. The API serializes config back to `config.json` on each save.
+`src/config.ts` is the single source of truth. There is **no shell-env layer** — the internal currency is the typed `JsonConfig`:
 
-**Env var override precedence** (for browser settings): explicit env vars (`BROWSER_HEADLESS`, `BROWSER_SLOW_MO_MS`, `BROWSER_KEEP_OPEN_MS`) take priority over `config.json` values when explicitly set. This is what makes `npm run watch-browser` work.
+```
+CLI flags (Partial<JsonConfig>) ─┐
+                                 ├─► mergeConfig (CLI wins) ─► buildAppConfig() ─► AppConfig
+config.json (JsonConfig) ────────┘                                                (typed, validated)
+```
+
+**Precedence: CLI flags > config.json.** `config.json` (project root, gitignored) is the REST-API/UI-persisted store; `ConfigStore` holds live config and is mutated by API calls, and `saveJsonConfig` writes it back. CLI flags are parsed by `src/cli-args.ts` (a declarative OPTIONS table that drives both parsing and `--help`) into a `Partial<JsonConfig>`, then `mergeConfig()` deep-merges them over `config.json` (CLI wins), and `buildAppConfig()` produces the validated `AppConfig`. This is what makes `npm run debug` (`--browserHeadless=false`) override `config.json`.
+
+**Secrets are never flags:** `geminiApiKey`, `groqApiKey`, `discordBotToken`, `discordWebhookUrl`, `discordSystemWebhookUrl` live in `config.json`/UI only.
 
 ### API + UI
 
