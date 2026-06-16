@@ -15,6 +15,7 @@ import {
   MessageBarBody,
   Field,
   Input,
+  Textarea,
   Switch,
   Text,
 } from '@fluentui/react-components';
@@ -27,6 +28,7 @@ import {
   SettingsRegular,
   EditRegular,
   DismissRegular,
+  LinkMultipleRegular,
 } from '@fluentui/react-icons';
 import { api, ApiError } from '../api/client.js';
 import type { SafeAppConfig, PutConfigRequest } from '../api/types.js';
@@ -105,6 +107,15 @@ interface Draft {
   showWebhookEdit: boolean;
   systemWebhookNew: string;
   showSystemWebhookEdit: boolean;
+  productWatchUrls: string;
+}
+
+/** Normalize a newline-separated URL list to a trimmed, non-empty array. */
+function parseWatchUrls(text: string): string[] {
+  return text
+    .split('\n')
+    .map((u) => u.trim())
+    .filter(Boolean);
 }
 
 function toDraft(config: SafeAppConfig): Draft {
@@ -117,18 +128,22 @@ function toDraft(config: SafeAppConfig): Draft {
     showWebhookEdit: false,
     systemWebhookNew: '',
     showSystemWebhookEdit: false,
+    productWatchUrls: (config.productWatchUrls ?? []).join('\n'),
   };
 }
 
 function isDirty(draft: Draft, saved: SafeAppConfig): boolean {
   const intervalMs = (parseInt(draft.intervalSeconds, 10) || 0) * 1000;
+  const watchChanged =
+    parseWatchUrls(draft.productWatchUrls).join('\n') !== (saved.productWatchUrls ?? []).join('\n');
   return (
     draft.targetUrl !== saved.target.url ||
     draft.targetSelector !== saved.target.selector ||
     intervalMs !== saved.schedule.intervalMs ||
     draft.runOnce !== saved.schedule.runOnce ||
     draft.webhookNew.trim() !== '' ||
-    draft.systemWebhookNew.trim() !== ''
+    draft.systemWebhookNew.trim() !== '' ||
+    watchChanged
   );
 }
 
@@ -176,6 +191,7 @@ export function ConfigPage() {
       const body: PutConfigRequest = {
         target: { url: draft.targetUrl.trim(), selector: draft.targetSelector.trim() },
         schedule: { intervalMs, runOnce: draft.runOnce },
+        productWatchUrls: parseWatchUrls(draft.productWatchUrls),
       };
       if (draft.webhookNew.trim() || draft.systemWebhookNew.trim()) {
         body.notifications = {};
@@ -293,6 +309,31 @@ export function ConfigPage() {
             </Field>
             <Text className={styles.hintText}>
               Leave selector blank to monitor the full page body.
+            </Text>
+          </div>
+        </Card>
+
+        {/* Product watch list */}
+        <Card>
+          <CardHeader
+            image={<LinkMultipleRegular fontSize={20} />}
+            header={<Title3>Product Watch List</Title3>}
+          />
+          <div className={styles.fieldGroup}>
+            <Field label="Product detail URLs (one per line)">
+              <Textarea
+                value={draft.productWatchUrls}
+                onChange={(e) => setField('productWatchUrls', e.target.value)}
+                placeholder={'https://www.hermes.com/us/en/product/…\nhttps://www.hermes.com/us/en/product/…'}
+                resize="vertical"
+                rows={5}
+                style={{ fontFamily: 'monospace' }}
+              />
+            </Field>
+            <Text className={styles.hintText}>
+              Each product page is re-checked every scrape and treated as the source of truth for
+              availability, overriding the (less reliable) listing page. Leave blank to use the
+              listing page only.
             </Text>
           </div>
         </Card>

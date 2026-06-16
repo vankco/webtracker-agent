@@ -203,6 +203,12 @@ export function createApiRouter(
       update.notifications = n;
     }
 
+    if (Array.isArray(body.productWatchUrls)) {
+      update.productWatchUrls = body.productWatchUrls
+        .map((u) => String(u).trim())
+        .filter(Boolean);
+    }
+
     configStore.update(update);
     persistConfig(configStore.get());
     ok(res, configStore.getSafe());

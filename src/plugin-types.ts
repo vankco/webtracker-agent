@@ -9,10 +9,18 @@ export interface PluginDiff {
   requestLlmFallback?: boolean;
 }
 
+export interface ExtractOptions {
+  /**
+   * Product detail URLs to treat as the source of truth for availability.
+   * The plugin re-checks each and overrides listing-page availability.
+   */
+  productWatchUrls?: string[];
+}
+
 export interface SitePlugin {
   name: string;
   matches(url: string): boolean;
-  extractProducts(page: Page): Promise<unknown[]>;
+  extractProducts(page: Page, options?: ExtractOptions): Promise<unknown[]>;
   productsToText(products: unknown[]): string;
   parseProductLine(line: string): unknown;
   filterAvailable(products: unknown[]): unknown[];

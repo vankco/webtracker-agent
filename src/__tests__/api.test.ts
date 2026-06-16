@@ -109,6 +109,23 @@ describe('PUT /api/config', () => {
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
   });
+
+  it('persists productWatchUrls, trimming and dropping empty entries', async () => {
+    const { app, configStore } = makeApp();
+    const res = await request(app)
+      .put('/api/config')
+      .send({ productWatchUrls: ['  https://www.hermes.com/p/a-H1/  ', '', 'https://www.hermes.com/p/b-H2/'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.productWatchUrls).toEqual([
+      'https://www.hermes.com/p/a-H1/',
+      'https://www.hermes.com/p/b-H2/',
+    ]);
+    expect(configStore.get().productWatchUrls).toEqual([
+      'https://www.hermes.com/p/a-H1/',
+      'https://www.hermes.com/p/b-H2/',
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------

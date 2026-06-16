@@ -63,6 +63,7 @@ export interface PutConfigRequest {
     discordWebhookUrl?: string;
     discordSystemWebhookUrl?: string;
   };
+  productWatchUrls?: string[];
 }
 
 export type PutConfigResponse = SafeAppConfig;

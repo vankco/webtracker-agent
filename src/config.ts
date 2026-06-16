@@ -47,6 +47,12 @@ export interface AppConfig {
   notifications: NotificationsConfig;
   llmProviders: LlmProviderConfig[];
   plugins: string[];
+  /**
+   * Product detail URLs to treat as the source of truth for availability.
+   * The active site plugin re-checks each per scrape and overrides the
+   * (less reliable) listing-page availability. Empty = listing-only behaviour.
+   */
+  productWatchUrls: string[];
 }
 
 /** API-safe provider config — never exposes raw API keys. */
@@ -231,6 +237,7 @@ export interface JsonConfig {
   discordWebhookUrl?: string;
   apiPort?: number;
   plugins?: string[];
+  productWatchUrls?: string[];
 
   // System/debug channel — health monitor and warn/error log alerts go here.
   // Falls back to discordWebhookUrl if not set.
@@ -385,6 +392,7 @@ export function saveJsonConfig(config: AppConfig, filePath = resolveConfigPath()
       manualAssistedInitialWaitMs: config.browser.manualAssistedInitialWaitMs,
     },
     plugins: config.plugins.length > 0 ? config.plugins : undefined,
+    productWatchUrls: config.productWatchUrls.length > 0 ? config.productWatchUrls : undefined,
   };
 
   fs.writeFileSync(filePath, JSON.stringify(json, null, 2), 'utf-8');
@@ -441,6 +449,7 @@ export function buildAppConfig(input: JsonConfig, opts: { strict?: boolean } = {
     },
     llmProviders: parseProviderConfig(input),
     plugins: input.plugins ?? [],
+    productWatchUrls: input.productWatchUrls ?? [],
   };
 
   if (opts.strict) {
@@ -506,6 +515,9 @@ export class ConfigStore {
     }
     if (updates.notifications) {
       this.config.notifications = { ...this.config.notifications, ...updates.notifications };
+    }
+    if (updates.productWatchUrls) {
+      this.config.productWatchUrls = [...updates.productWatchUrls];
     }
     if (updates.llmProviders) {
       // Merge by provider id — preserves existing API keys unless explicitly overwritten

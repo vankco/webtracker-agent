@@ -195,7 +195,7 @@ export class MonitorController {
     log('info', 'scrape', `Fetching ${target.url}`, { selector: target.selector || '(none)', plugin: plugin?.name ?? 'none' });
     const scrapeStart = Date.now();
 
-    const currentContent = await this.deps.scrapePageText(target.url, target.selector, browser, plugin ?? undefined);
+    const currentContent = await this.deps.scrapePageText(target.url, target.selector, browser, plugin ?? undefined, config.productWatchUrls);
 
     // For plugin URLs: parse structured products and derive available subset
     const currentProducts: unknown[] | null = plugin

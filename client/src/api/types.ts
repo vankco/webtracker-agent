@@ -50,6 +50,7 @@ export interface SafeAppConfig {
   };
   notifications: { discordWebhookUrl: string; discordSystemWebhookUrl: string };
   llmProviders: SafeLlmProviderConfig[];
+  productWatchUrls: string[];
 }
 
 export type GetConfigResponse = SafeAppConfig;
@@ -60,6 +61,7 @@ export interface PutConfigRequest {
   schedule?: { intervalMs?: number; runOnce?: boolean };
   browser?: Partial<SafeAppConfig['browser']>;
   notifications?: { discordWebhookUrl?: string; discordSystemWebhookUrl?: string };
+  productWatchUrls?: string[];
 }
 
 // ---------------------------------------------------------------------------

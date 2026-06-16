@@ -167,7 +167,8 @@ export async function scrapePageText(
   url: string,
   selector: string | undefined,
   browserConfig: BrowserConfig,
-  plugin?: SitePlugin
+  plugin?: SitePlugin,
+  productWatchUrls?: string[]
 ): Promise<string> {
   // browserConfig is fully resolved by buildBrowserConfig — including the
   // manualAssisted forcing of headless=false and persistSession=true — so we
@@ -218,7 +219,7 @@ export async function scrapePageText(
     let text: string;
 
     if (plugin) {
-      const products = await plugin.extractProducts(page);
+      const products = await plugin.extractProducts(page, { productWatchUrls });
       text = plugin.productsToText(products);
     } else {
       const target = selector && selector.trim() ? selector.trim() : 'body';

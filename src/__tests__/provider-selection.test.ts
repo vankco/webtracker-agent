@@ -54,6 +54,7 @@ function makeConfig(providers: LlmProviderConfig[]): AppConfig {
     },
     notifications: { discordWebhookUrl: 'https://discord.com/api/webhooks/test', discordSystemWebhookUrl: '' },
     plugins: [],
+    productWatchUrls: [],
     llmProviders: providers,
   };
 }

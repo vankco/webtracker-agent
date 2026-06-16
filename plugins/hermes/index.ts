@@ -11,6 +11,10 @@ interface PluginDiff {
   requestLlmFallback?: boolean;
 }
 
+interface ExtractOptions {
+  productWatchUrls?: string[];
+}
+
 interface HistoryEntry {
   timestamp: string;
   products: unknown[];
@@ -21,7 +25,7 @@ interface HistoryEntry {
 interface SitePlugin {
   name: string;
   matches(url: string): boolean;
-  extractProducts(page: Page): Promise<unknown[]>;
+  extractProducts(page: Page, options?: ExtractOptions): Promise<unknown[]>;
   productsToText(products: unknown[]): string;
   parseProductLine(line: string): unknown;
   filterAvailable(products: unknown[]): unknown[];
@@ -49,6 +53,20 @@ export interface HermesDiff {
   changed: Array<{ old: HermesProduct; new: HermesProduct }>;
 }
 
+/** Result of re-checking a single product detail page (the source of truth). */
+export interface ProductVerification {
+  /** The product detail URL that was checked. */
+  url: string;
+  /** SKU derived from the URL (used to match against listing products). */
+  sku: string;
+  /** True availability read from the product page. Meaningful only when ok. */
+  available: boolean;
+  /** False when the page failed to load (timeout / bot challenge). */
+  ok: boolean;
+  /** Best-effort product built from the page — used when the URL isn't on the listing. */
+  product?: HermesProduct;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -70,6 +88,28 @@ function toTyped(products: unknown[]): HermesProduct[] {
 
 export function isHermesUrl(url: string): boolean {
   return url.includes('hermes.com');
+}
+
+/**
+ * Extracts the SKU from a Hermès product URL. Product URLs end with the SKU as
+ * the final '-' token, e.g.
+ *   https://www.hermes.com/us/en/product/picotin-lock-18-bag-H056289CKAA/
+ *     -> "H056289CKAA"
+ * Returns '' when no token can be derived.
+ */
+export function skuFromUrl(url: string): string {
+  const path = (url || '').split('?')[0].split('#')[0].replace(/\/+$/, '');
+  const lastSeg = path.split('/').pop() ?? '';
+  const token = lastSeg.split('-').pop() ?? '';
+  return token.toUpperCase();
+}
+
+/** True when a listing product corresponds to the given SKU (by sku field or URL). */
+function productMatchesSku(p: HermesProduct, sku: string): boolean {
+  if (!sku) return false;
+  const bySku = (p.sku || '').toUpperCase();
+  if (bySku && bySku === sku) return true;
+  return p.url ? skuFromUrl(`${HERMES_BASE}${p.url}`) === sku : false;
 }
 
 async function saveDebugHtml(page: Page, reason: string): Promise<void> {
@@ -226,7 +266,109 @@ async function applyHermesFilter(page: Page): Promise<boolean> {
   return true;
 }
 
-export async function extractHermesProducts(page: Page): Promise<HermesProduct[]> {
+/**
+ * Re-checks a single product detail page and returns its TRUE availability.
+ * The product page is the source of truth — the listing's `has_stock` facet
+ * over-reports availability. On any navigation/load failure returns ok=false so
+ * the caller can keep the listing value.
+ */
+export async function verifyProductAvailability(page: Page, url: string): Promise<ProductVerification> {
+  const sku = skuFromUrl(url);
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
+    await randomDelay(1500, 3000);
+
+    // Function passed to page.evaluate must not close over outer variables.
+    const info = await page.evaluate(() => {
+      // Hermès product pages embed a JSON-LD Product whose `offers.availability`
+      // is the source of truth and is present even in server-rendered HTML
+      // (e.g. "http://schema.org/InStock" vs ".../OutOfStock"). Parse that first.
+      let ldAvailability = '';
+      let ldName = '';
+      let ldPrice = '';
+      let ldSku = '';
+      const ld = document.querySelector('script#microdata, script[type="application/ld+json"]');
+      if (ld && ld.textContent) {
+        try {
+          const data = JSON.parse(ld.textContent);
+          const node = Array.isArray(data) ? data.find((d) => d && d['@type'] === 'Product') : data;
+          if (node) {
+            ldName = String(node.name || '').trim();
+            ldSku = String(node.sku || node.mpn || '').trim();
+            const offers = Array.isArray(node.offers) ? node.offers[0] : node.offers;
+            if (offers) {
+              ldAvailability = String(offers.availability || '');
+              ldPrice = offers.price != null ? String(offers.price) : '';
+            }
+          }
+        } catch {
+          /* malformed JSON-LD — fall back to DOM heuristics below */
+        }
+      }
+      const txt = (document.body.innerText || '').toLowerCase();
+      return {
+        ldAvailability,
+        ldName,
+        ldPrice,
+        ldSku,
+        // A removed product 404s: the SPA routes to its not-found page and
+        // rewrites the URL to /404-error. Treat this as a definitive "gone".
+        isNotFound:
+          !!document.querySelector('h-not-found-page') ||
+          /\b404\b/.test(document.title) ||
+          location.href.includes('/404-error'),
+        // Secondary DOM signals, used only when JSON-LD is absent.
+        hasAddToCart: !!document.querySelector('[data-testid="Add to cart"], h-call-to-action-add-to-cart button'),
+        noLongerAvailable: txt.includes('no longer available'),
+        color: (document.querySelector('.product-selector .current-value')?.textContent || '').trim(),
+      };
+    });
+
+    // Source of truth, in order: a 404/not-found page means the product is gone
+    // (definitively unavailable); otherwise JSON-LD offers.availability
+    // (InStock ⇒ available); otherwise fall back to the add-to-cart affordance.
+    const available = info.isNotFound
+      ? false
+      : info.ldAvailability
+        ? /InStock/i.test(info.ldAvailability)
+        : info.hasAddToCart && !info.noLongerAvailable;
+
+    const price = info.ldPrice ? `$${Number(info.ldPrice).toLocaleString('en-US')}` : '';
+    const product: HermesProduct = {
+      name: info.ldName,
+      color: info.color,
+      price,
+      sku: info.ldSku || sku,
+      available,
+      url: url.replace(/^https?:\/\/[^/]+/, ''),
+    };
+    return { url, sku, available, ok: true, product };
+  } catch (err) {
+    await saveDebugHtml(page, `product-verify-${sku || 'unknown'}`).catch(() => {});
+    console.warn(`[hermes:verify] ${url} failed:`, err instanceof Error ? err.message : err);
+    return { url, sku, available: false, ok: false };
+  }
+}
+
+/**
+ * Visits each watch URL sequentially (random delays between — lowest detection)
+ * and merges the product-page truth into the listing products.
+ */
+async function verifyAndMergeWatchProducts(
+  page: Page,
+  listing: HermesProduct[],
+  watchUrls: string[]
+): Promise<HermesProduct[]> {
+  const verifications: ProductVerification[] = [];
+  for (const url of watchUrls) {
+    await randomDelay(2000, 5000);
+    verifications.push(await verifyProductAvailability(page, url));
+  }
+  return mergeWatchAvailability(listing, verifications);
+}
+
+export async function extractHermesProducts(page: Page, options?: ExtractOptions): Promise<HermesProduct[]> {
   // If the current URL has complex filter params (fh_location etc.), warm up the
   // SPA by loading the base URL first so the JS runtime is fully initialised,
   // then do a client-side hash navigation to the filtered view.
@@ -296,20 +438,25 @@ export async function extractHermesProducts(page: Page): Promise<HermesProduct[]
     });
   });
 
-  const products = await extract();
+  let products = await extract();
 
   // If nothing came back the page likely didn't finish rendering (slow SPA or
   // transient bot challenge). Wait a bit and try once more before giving up.
   if (products.length === 0) {
     await page.waitForSelector('div.product-item', { timeout: 30_000 }).catch(() => {});
     await randomDelay(2000, 4000);
-    const retry = await extract();
+    products = await extract();
 
-    if (retry.length === 0) {
+    if (products.length === 0) {
       await saveDebugHtml(page, 'retry-also-empty');
     }
+  }
 
-    return retry;
+  // Re-verify availability against the product detail pages (source of truth).
+  // Done last so the listing extraction above isn't disturbed by navigating away.
+  const watchUrls = options?.productWatchUrls ?? [];
+  if (watchUrls.length > 0) {
+    products = await verifyAndMergeWatchProducts(page, products, watchUrls);
   }
 
   return products;
@@ -353,6 +500,36 @@ export function diffHermesProducts(oldProducts: HermesProduct[], newProducts: He
       .map(p => ({ old: oldMap.get(p.sku)!, new: p }))
       .filter(({ old: o, new: n }) => o.price !== n.price || o.color !== n.color || o.name !== n.name),
   };
+}
+
+/**
+ * Merges product-page truth (the source of truth) into the listing products.
+ *
+ *  - watch URL matches a listing product + ok  → override its `available`
+ *  - watch URL matches a listing product + !ok → keep the listing value
+ *  - watch URL not on the listing + ok          → append the product-page product
+ *  - watch URL not on the listing + !ok         → skip (not added this cycle)
+ *  - listing products with no watch URL          → passed through untouched
+ *
+ * Example: watch [E,F], listing shows A,B,C,D,E available; E's page says no,
+ * F's page (not on the listing) says yes → result available set = A,B,C,D,F.
+ */
+export function mergeWatchAvailability(
+  listing: HermesProduct[],
+  verifications: ProductVerification[]
+): HermesProduct[] {
+  const result = listing.map((p) => ({ ...p }));
+  for (const v of verifications) {
+    const idx = result.findIndex((p) => productMatchesSku(p, v.sku));
+    if (idx >= 0) {
+      if (v.ok) result[idx] = { ...result[idx], available: v.available };
+      // !ok → keep listing value (no-op)
+    } else if (v.ok && v.product) {
+      result.push(v.product);
+    }
+    // not on listing + !ok → skip
+  }
+  return result;
 }
 
 export function summarizeHermesDiff(diff: HermesDiff): string {
