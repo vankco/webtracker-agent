@@ -192,7 +192,7 @@ export class MonitorController {
     const providers = getEnabledProvidersByPriority(config);
     const plugin: SitePlugin | null = this.registry.findForUrl(target.url);
 
-    log('info', 'scrape', `Fetching ${target.url}`, { selector: target.selector || '(none)', plugin: plugin?.name ?? 'none' });
+    log('info', 'scrape', `Fetching`, { url: target.url, selector: target.selector || '(none)', plugin: plugin?.name ?? 'none' });
     const scrapeStart = Date.now();
 
     const currentContent = await this.deps.scrapePageText(target.url, target.selector, browser, plugin ?? undefined, config.productWatchUrls);

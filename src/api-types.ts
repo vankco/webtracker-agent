@@ -12,9 +12,6 @@ import type {
   BrowserConfig,
 } from './config.js';
 import type { AnalysisResult } from './analyzer.js';
-import type { PredictionResult } from './predictor.js';
-
-export type { PredictionResult };
 
 // ---------------------------------------------------------------------------
 // Envelope types
@@ -218,12 +215,6 @@ export interface LogEntry {
 }
 
 export type GetLogsResponse = LogEntry[];
-
-// ---------------------------------------------------------------------------
-// POST /api/predict
-// ---------------------------------------------------------------------------
-
-export type PredictResponse = PredictionResult;
 
 // ---------------------------------------------------------------------------
 // POST /api/ask

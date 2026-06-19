@@ -20,7 +20,7 @@ export interface MonitorState {
   lastChecked: string;
   /** Structured product data stored by site plugins. Shape is plugin-defined. */
   lastProducts?: unknown[];
-  /** Time-series of change events for trend analysis and predictions. */
+  /** Time-series of change events for trend analysis and the Discord bot's Q&A. */
   history?: HistoryEntry[];
 }
 

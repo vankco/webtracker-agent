@@ -3,14 +3,12 @@
  * All external I/O is mocked — no real network, browser, or LLM calls.
  */
 
-import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { createApiApp } from '../api.js';
 import { ConfigStore, loadAppConfigLenient } from '../config.js';
 import { MonitorController } from '../monitor-controller.js';
 import { PluginRegistry } from '../plugin-registry.js';
-import { loadState } from '../state.js';
-import type { SitePlugin } from '../plugin-types.js';
 
 // ---------------------------------------------------------------------------
 // Mock heavy dependencies so tests run fast & offline
@@ -321,123 +319,13 @@ describe('POST /api/validate/scrape', () => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/predict
-// ---------------------------------------------------------------------------
-
-function makePredictionPlugin(): SitePlugin {
-  return {
-    name: 'Fake',
-    matches: () => true,
-    extractProducts: async () => [],
-    productsToText: () => '',
-    parseProductLine: () => ({}),
-    filterAvailable: (p) => p,
-    diff: () => ({ hasChanges: false, summary: '', alertBody: '' }),
-    formatBaselineMessage: () => '',
-    formatHistoryForPrediction: () => 'formatted history',
-  };
-}
-
-function makePredictApp(opts: { withPlugin?: boolean; predictor?: any } = {}) {
-  const configStore = new ConfigStore(makeFullConfig());
-  const registry = new PluginRegistry();
-  if (opts.withPlugin !== false) registry.register(makePredictionPlugin());
-  const monitorController = new MonitorController({}, registry);
-  const predictor =
-    opts.predictor ??
-    vi.fn().mockResolvedValue({
-      generatedAt: '2026-06-01T00:00:00.000Z',
-      provider: 'gemini',
-      model: 'gemini-2.5-flash',
-      summary: 'Likely restock soon.',
-      insights: ['Bag X restocks weekly'],
-      historyEntryCount: 5,
-    });
-  const app = createApiApp(configStore, monitorController, () => {}, predictor);
-  return { app, predictor };
-}
-
-describe('POST /api/predict', () => {
-  beforeEach(() => {
-    vi.mocked(loadState).mockReturnValue(null);
-  });
-
-  it('returns 200 with a prediction when history and plugin are present', async () => {
-    vi.mocked(loadState).mockReturnValue({
-      url: 'https://example.com',
-      lastContent: '',
-      lastChecked: '2026-06-01T00:00:00.000Z',
-      history: [
-        { timestamp: 't1', products: [], availableCount: 1, changeSummary: 'baseline' },
-        { timestamp: 't2', products: [], availableCount: 2, changeSummary: '1 newly available' },
-        { timestamp: 't3', products: [], availableCount: 1, changeSummary: '1 no longer available' },
-      ],
-    });
-    const { app, predictor } = makePredictApp();
-    const res = await request(app).post('/api/predict').send({});
-    expect(res.status).toBe(200);
-    expect(res.body.data.summary).toBe('Likely restock soon.');
-    expect(res.body.data.insights).toHaveLength(1);
-    expect(predictor).toHaveBeenCalledOnce();
-  });
-
-  it('returns 422 when there is not enough history', async () => {
-    vi.mocked(loadState).mockReturnValue({
-      url: 'https://example.com',
-      lastContent: '',
-      lastChecked: '2026-06-01T00:00:00.000Z',
-      history: [{ timestamp: 't1', products: [], availableCount: 1, changeSummary: 'baseline' }],
-    });
-    const { app } = makePredictApp();
-    const res = await request(app).post('/api/predict').send({});
-    expect(res.status).toBe(422);
-    expect(res.body.error.code).toBe('PREDICTION_FAILED');
-  });
-
-  it('returns 422 when no plugin matches the URL', async () => {
-    vi.mocked(loadState).mockReturnValue({
-      url: 'https://example.com',
-      lastContent: '',
-      lastChecked: '2026-06-01T00:00:00.000Z',
-      history: [
-        { timestamp: 't1', products: [], availableCount: 1, changeSummary: 'baseline' },
-        { timestamp: 't2', products: [], availableCount: 2, changeSummary: 'x' },
-        { timestamp: 't3', products: [], availableCount: 1, changeSummary: 'y' },
-      ],
-    });
-    const { app } = makePredictApp({ withPlugin: false });
-    const res = await request(app).post('/api/predict').send({});
-    expect(res.status).toBe(422);
-    expect(res.body.error.code).toBe('PREDICTION_FAILED');
-  });
-
-  it('returns 502 when the predictor throws', async () => {
-    vi.mocked(loadState).mockReturnValue({
-      url: 'https://example.com',
-      lastContent: '',
-      lastChecked: '2026-06-01T00:00:00.000Z',
-      history: [
-        { timestamp: 't1', products: [], availableCount: 1, changeSummary: 'baseline' },
-        { timestamp: 't2', products: [], availableCount: 2, changeSummary: 'x' },
-        { timestamp: 't3', products: [], availableCount: 1, changeSummary: 'y' },
-      ],
-    });
-    const failingPredictor = vi.fn().mockRejectedValue(new Error('all providers failed'));
-    const { app } = makePredictApp({ predictor: failingPredictor });
-    const res = await request(app).post('/api/predict').send({});
-    expect(res.status).toBe(502);
-    expect(res.body.error.code).toBe('PREDICTION_FAILED');
-  });
-});
-
-// ---------------------------------------------------------------------------
 // POST /api/ask
 // ---------------------------------------------------------------------------
 
 function makeAskApp(qaAnswerer = vi.fn().mockResolvedValue('Bag A is available.')) {
   const configStore = new ConfigStore(makeFullConfig());
   const monitorController = new MonitorController();
-  const app = createApiApp(configStore, monitorController, () => {}, undefined, qaAnswerer);
+  const app = createApiApp(configStore, monitorController, () => {}, qaAnswerer);
   return { app, configStore, monitorController, qaAnswerer };
 }
 

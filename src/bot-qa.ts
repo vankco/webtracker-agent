@@ -1,7 +1,7 @@
 /**
  * bot-qa.ts
  * LLM-powered natural-language Q&A over product availability data.
- * Mirrors the provider-failover pattern in predictor.ts.
+ * Mirrors the provider-failover pattern in llm.ts.
  * Called by POST /api/ask, which the Discord bot hits for /ask questions.
  */
 
