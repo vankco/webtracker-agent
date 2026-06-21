@@ -362,7 +362,6 @@ async function verifyAndMergeWatchProducts(
 ): Promise<HermesProduct[]> {
   const verifications: ProductVerification[] = [];
   for (const url of watchUrls) {
-    await randomDelay(2000, 5000);
     verifications.push(await verifyProductAvailability(page, url));
   }
   return mergeWatchAvailability(listing, verifications);
