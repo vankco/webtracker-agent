@@ -201,16 +201,3 @@ export interface ValidateScrapeResponse {
   error?: string;
   latencyMs: number;
 }
-
-// ---------------------------------------------------------------------------
-// Predict
-// ---------------------------------------------------------------------------
-
-export interface PredictionResult {
-  generatedAt: string;
-  provider: string;
-  model?: string;
-  summary: string;
-  insights: string[];
-  historyEntryCount: number;
-}

@@ -31,7 +31,7 @@ import {
   TimerRegular,
 } from '@fluentui/react-icons';
 import { api, ApiError } from '../api/client.js';
-import type { MonitorStatus, ValidateScrapeResponse, ContentSnapshot, PredictionResult } from '../api/types.js';
+import type { MonitorStatus, ValidateScrapeResponse, ContentSnapshot } from '../api/types.js';
 
 const useStyles = makeStyles({
   root: {
@@ -192,11 +192,6 @@ export function MonitorPage() {
   const [scrapeTesting, setScrapeTesting] = useState(false);
   const [scrapeResult, setScrapeResult] = useState<ValidateScrapeResponse | null>(null);
 
-  // Predictions
-  const [predicting, setPredicting] = useState(false);
-  const [prediction, setPrediction] = useState<PredictionResult | null>(null);
-  const [predictionError, setPredictionError] = useState<string | null>(null);
-
   const fetchStatus = useCallback(async () => {
     try {
       const s = await api.monitor.status();
@@ -296,20 +291,6 @@ export function MonitorPage() {
       });
     } finally {
       setScrapeTesting(false);
-    }
-  }
-
-  async function handlePredict() {
-    setPredicting(true);
-    setPrediction(null);
-    setPredictionError(null);
-    try {
-      const result = await api.predict();
-      setPrediction(result);
-    } catch (err) {
-      setPredictionError(err instanceof ApiError ? err.message : 'Prediction failed.');
-    } finally {
-      setPredicting(false);
     }
   }
 
@@ -452,59 +433,6 @@ export function MonitorPage() {
           </div>
         </Card>
       )}
-
-      {/* Predictions */}
-      <Card>
-        <CardHeader
-          header={
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' }}>
-              <Title3>Predictions</Title3>
-              <Button
-                appearance="primary"
-                size="small"
-                disabled={predicting}
-                icon={predicting ? <Spinner size="tiny" /> : undefined}
-                onClick={() => void handlePredict()}
-              >
-                {predicting ? 'Analyzing…' : 'Run Prediction'}
-              </Button>
-            </div>
-          }
-        />
-        <div className={styles.resultCard}>
-          {!prediction && !predictionError && !predicting && (
-            <Caption1 className={styles.muted}>
-              Analyzes collected history to forecast restocks, sellouts, and price trends.
-            </Caption1>
-          )}
-          {predictionError && (
-            <MessageBar intent="warning">
-              <MessageBarBody>{predictionError}</MessageBarBody>
-            </MessageBar>
-          )}
-          {prediction && (
-            <>
-              <div className={styles.resultMeta}>
-                <Caption1>
-                  Provider: <strong>{prediction.provider}</strong>
-                  {prediction.model && ` / ${prediction.model}`}
-                </Caption1>
-                <Caption1 className={styles.muted}>
-                  {prediction.historyEntryCount} events · {formatTime(prediction.generatedAt)}
-                </Caption1>
-              </div>
-              <div className={styles.summaryText}>{prediction.summary}</div>
-              {prediction.insights.length > 0 && (
-                <ul style={{ margin: 0, paddingLeft: tokens.spacingHorizontalXL }}>
-                  {prediction.insights.map((insight, i) => (
-                    <li key={i}><Body1>{insight}</Body1></li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
-        </div>
-      </Card>
 
       {/* Errors */}
       {status && status.errors.length > 0 && (

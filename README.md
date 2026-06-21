@@ -13,7 +13,7 @@ AI-powered website change monitor. Watches a page for meaningful changes and sen
 3. A Discord alert is sent with the result
 4. If all LLM providers fail, a local text-diff fallback is used (generic sites only)
 5. On first run with no prior state, plugins send a baseline alert listing all currently tracked items
-6. For plugin URLs, each change event is appended to a time-series `history` in `state.json` (capped at 500 events) — this builds the dataset used for trend analysis and predictions
+6. For plugin URLs, each change event is appended to a time-series `history` in `state.json` (capped at 500 events) — this builds the dataset used for trend analysis and the Discord bot's Q&A
 
 ---
 
@@ -191,7 +191,6 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 - **Last Check / Next Check** — when the last check ran and when the next is scheduled (Next Check only shown while running)
 - **Last Result** — the LLM's analysis from the most recent check, including provider, model, and latency
 - **Recent Fetched Content** — last 2 scraped snapshots with timestamp, character count, and first 500 chars preview
-- **Predictions** — for plugin URLs with collected history, click "Run Prediction" to have an LLM forecast likely restocks, sellouts, and price trends from the time-series data. Requires at least 3 recorded change events.
 - **Recent Errors** — scrape failures, empty content warnings, etc.
 - **Schedule Controls** — change the check interval or enable run-once mode without restarting
 - **Scrape Validator** — test a URL + CSS selector before starting the monitor; shows a content preview and character count
@@ -343,7 +342,6 @@ src/
   scraper.ts            — Playwright browser automation
   notifier.ts           — Discord webhook alerts
   state.ts              — persist last scrape to state.json
-  predictor.ts          — LLM-powered availability & price predictions
   bot-qa.ts             — LLM-powered Q&A for the Discord bot
   discord-bot.ts        — standalone Discord bot process
   discord-bot-commands.ts — slash command definitions and reply formatters
