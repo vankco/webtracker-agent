@@ -29,9 +29,11 @@ import {
   EditRegular,
   DismissRegular,
   LinkMultipleRegular,
+  AddRegular,
+  DeleteRegular,
 } from '@fluentui/react-icons';
 import { api, ApiError } from '../api/client.js';
-import type { SafeAppConfig, PutConfigRequest } from '../api/types.js';
+import type { SafeAppConfig, PutConfigRequest, SiteConfig, SiteSchedule } from '../api/types.js';
 
 const useStyles = makeStyles({
   root: {
@@ -70,6 +72,23 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
     alignItems: 'flex-end',
   },
+  siteRow: {
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: tokens.spacingVerticalM,
+  },
+  siteRowHead: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalM,
+  },
+  windowRow: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr 1fr auto',
+    gap: tokens.spacingHorizontalXS,
+    alignItems: 'center',
+  },
   emptyState: {
     textAlign: 'center',
     padding: tokens.spacingVerticalXXL,
@@ -99,8 +118,6 @@ const useStyles = makeStyles({
 });
 
 interface Draft {
-  targetUrl: string;
-  targetSelector: string;
   intervalSeconds: string;
   runOnce: boolean;
   webhookNew: string;
@@ -120,8 +137,6 @@ function parseWatchUrls(text: string): string[] {
 
 function toDraft(config: SafeAppConfig): Draft {
   return {
-    targetUrl: config.target.url,
-    targetSelector: config.target.selector,
     intervalSeconds: String(Math.round(config.schedule.intervalMs / 1000)),
     runOnce: config.schedule.runOnce,
     webhookNew: '',
@@ -137,14 +152,242 @@ function isDirty(draft: Draft, saved: SafeAppConfig): boolean {
   const watchChanged =
     parseWatchUrls(draft.productWatchUrls).join('\n') !== (saved.productWatchUrls ?? []).join('\n');
   return (
-    draft.targetUrl !== saved.target.url ||
-    draft.targetSelector !== saved.target.selector ||
     intervalMs !== saved.schedule.intervalMs ||
     draft.runOnce !== saved.schedule.runOnce ||
     draft.webhookNew.trim() !== '' ||
     draft.systemWebhookNew.trim() !== '' ||
     watchChanged
   );
+}
+
+// ---------------------------------------------------------------------------
+// Tracked Sites — per-site CRUD + schedule editor (independent of the draft Save)
+// ---------------------------------------------------------------------------
+
+function secToMs(s: string): number {
+  return Math.max(1, Math.round((parseFloat(s) || 0) * 1000));
+}
+function msToSec(ms?: number): string {
+  return ms != null ? String(Math.round(ms / 1000)) : '';
+}
+
+interface WindowDraft { startHour: string; endHour: string; intervalSec: string }
+
+interface SiteDraft {
+  url: string;
+  selector: string;
+  label: string;
+  intervalSec: string;
+  scheduleOn: boolean;
+  timezone: string;
+  schedDefaultSec: string;
+  windows: WindowDraft[];
+}
+
+function siteToDraft(s: SiteConfig): SiteDraft {
+  return {
+    url: s.url,
+    selector: s.selector,
+    label: s.label ?? '',
+    intervalSec: msToSec(s.intervalMs),
+    scheduleOn: Boolean(s.schedule),
+    timezone: s.schedule?.timezone ?? 'America/Los_Angeles',
+    schedDefaultSec: msToSec(s.schedule?.intervalMs),
+    windows: (s.schedule?.windows ?? []).map((w) => ({
+      startHour: String(w.startHour),
+      endHour: String(w.endHour),
+      intervalSec: msToSec(w.intervalMs),
+    })),
+  };
+}
+
+/** Always returns a schedule object so toggling the schedule off clears windows. */
+function draftToSchedule(d: SiteDraft): SiteSchedule {
+  if (!d.scheduleOn) return {};
+  const sched: SiteSchedule = {};
+  if (d.timezone.trim()) sched.timezone = d.timezone.trim();
+  if (d.schedDefaultSec.trim()) sched.intervalMs = secToMs(d.schedDefaultSec);
+  const windows = d.windows
+    .filter((w) => w.intervalSec.trim() !== '')
+    .map((w) => ({
+      startHour: Math.min(23, Math.max(0, parseInt(w.startHour, 10) || 0)),
+      endHour: Math.min(24, Math.max(0, parseInt(w.endHour, 10) || 0)),
+      intervalMs: secToMs(w.intervalSec),
+    }));
+  if (windows.length) sched.windows = windows;
+  return sched;
+}
+
+function TrackedSites({
+  sites,
+  onChanged,
+  onError,
+}: {
+  sites: SiteConfig[];
+  onChanged: () => void | Promise<void>;
+  onError: (m: string) => void;
+}) {
+  const styles = useStyles();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<SiteDraft | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [newUrl, setNewUrl] = useState('');
+  const [newLabel, setNewLabel] = useState('');
+
+  const patchDraft = (p: Partial<SiteDraft>) => setDraft((d) => (d ? { ...d, ...p } : d));
+
+  const wrap = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    onError('');
+    try {
+      await fn();
+      await onChanged();
+    } catch (err) {
+      onError(err instanceof ApiError ? err.message : 'Site operation failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveEdit = (id: string) =>
+    void wrap(async () => {
+      if (!draft) return;
+      await api.sites.update(id, {
+        url: draft.url.trim(),
+        selector: draft.selector.trim(),
+        label: draft.label.trim(),
+        ...(draft.intervalSec.trim() ? { intervalMs: secToMs(draft.intervalSec) } : {}),
+        schedule: draftToSchedule(draft),
+      });
+      setEditingId(null);
+      setDraft(null);
+    });
+
+  return (
+    <Card>
+      <CardHeader
+        image={<GlobeRegular fontSize={20} />}
+        header={
+          <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+            <Title3>Tracked Sites</Title3>
+            <Badge appearance="outline" color="informative">{sites.length}</Badge>
+          </div>
+        }
+      />
+      <div className={styles.fieldGroup}>
+        {sites.map((s) => {
+          const editing = editingId === s.id;
+          return (
+            <div key={s.id} className={styles.siteRow}>
+              <div className={styles.siteRowHead}>
+                <div style={{ overflow: 'hidden' }}>
+                  <Text weight="semibold">{s.label || s.url}</Text>
+                  <div className={styles.hintText} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.url}>{s.url}</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS, flexShrink: 0 }}>
+                  <Switch
+                    checked={s.enabled}
+                    disabled={busy}
+                    onChange={() => void wrap(async () => { await api.sites.update(s.id, { enabled: !s.enabled }); })}
+                    label={s.enabled ? 'On' : 'Off'}
+                  />
+                  <Button size="small" appearance="subtle" icon={<EditRegular />} disabled={busy}
+                    onClick={() => (editing ? (setEditingId(null), setDraft(null)) : startEditRow(s))}>
+                    {editing ? 'Close' : 'Edit'}
+                  </Button>
+                  <Button size="small" appearance="subtle" icon={<DeleteRegular />} disabled={busy || sites.length <= 1}
+                    title={sites.length <= 1 ? 'Cannot remove the last site' : 'Remove site'}
+                    onClick={() => void wrap(async () => { await api.sites.remove(s.id); })} />
+                </div>
+              </div>
+
+              {editing && draft && (
+                <div className={styles.fieldGroup} style={{ marginTop: tokens.spacingVerticalS }}>
+                  <Field label="URL" required>
+                    <Input value={draft.url} onChange={(e) => patchDraft({ url: e.target.value })} style={{ fontFamily: 'monospace' }} />
+                  </Field>
+                  <Field label="CSS Selector">
+                    <Input value={draft.selector} onChange={(e) => patchDraft({ selector: e.target.value })} placeholder="(entire page)" style={{ fontFamily: 'monospace' }} />
+                  </Field>
+                  <Field label="Label">
+                    <Input value={draft.label} onChange={(e) => patchDraft({ label: e.target.value })} placeholder="(optional)" />
+                  </Field>
+                  <Field label="Per-site interval (seconds, blank = use global)">
+                    <Input type="number" min={1} value={draft.intervalSec} onChange={(e) => patchDraft({ intervalSec: e.target.value })} />
+                  </Field>
+
+                  <Field label="Time-of-day schedule">
+                    <Switch checked={draft.scheduleOn} onChange={(_e, d) => patchDraft({ scheduleOn: d.checked })}
+                      label={draft.scheduleOn ? 'On' : 'Off (use interval / plugin default)'} />
+                  </Field>
+                  {draft.scheduleOn && (
+                    <div className={styles.fieldGroup} style={{ paddingLeft: tokens.spacingHorizontalM }}>
+                      <Field label="Timezone (IANA)">
+                        <Input value={draft.timezone} onChange={(e) => patchDraft({ timezone: e.target.value })} placeholder="America/Los_Angeles" style={{ fontFamily: 'monospace' }} />
+                      </Field>
+                      <Field label="Default cadence outside windows (seconds)">
+                        <Input type="number" min={1} value={draft.schedDefaultSec} onChange={(e) => patchDraft({ schedDefaultSec: e.target.value })} />
+                      </Field>
+                      <Caption1 className={styles.hintText}>Windows (start hour → end hour, cadence). End may wrap past midnight.</Caption1>
+                      {draft.windows.map((w, i) => (
+                        <div key={i} className={styles.windowRow}>
+                          <Input type="number" min={0} max={23} value={w.startHour} placeholder="start"
+                            onChange={(e) => patchDraft({ windows: draft.windows.map((x, j) => j === i ? { ...x, startHour: e.target.value } : x) })} />
+                          <Input type="number" min={0} max={24} value={w.endHour} placeholder="end"
+                            onChange={(e) => patchDraft({ windows: draft.windows.map((x, j) => j === i ? { ...x, endHour: e.target.value } : x) })} />
+                          <Input type="number" min={1} value={w.intervalSec} placeholder="sec"
+                            onChange={(e) => patchDraft({ windows: draft.windows.map((x, j) => j === i ? { ...x, intervalSec: e.target.value } : x) })} />
+                          <Button size="small" appearance="subtle" icon={<DismissRegular />}
+                            onClick={() => patchDraft({ windows: draft.windows.filter((_x, j) => j !== i) })} />
+                        </div>
+                      ))}
+                      <Button size="small" appearance="outline" icon={<AddRegular />}
+                        onClick={() => patchDraft({ windows: [...draft.windows, { startHour: '6', endHour: '11', intervalSec: '120' }] })}>
+                        Add window
+                      </Button>
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: tokens.spacingHorizontalS }}>
+                    <Button size="small" appearance="primary" icon={<SaveRegular />} disabled={busy} onClick={() => saveEdit(s.id)}>Save site</Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {adding ? (
+          <div className={styles.siteRow}>
+            <div className={styles.fieldGroup}>
+              <Field label="URL" required>
+                <Input value={newUrl} onChange={(e) => setNewUrl(e.target.value)} placeholder="https://example.com" style={{ fontFamily: 'monospace' }} autoFocus />
+              </Field>
+              <Field label="Label">
+                <Input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="(optional)" />
+              </Field>
+              <div style={{ display: 'flex', gap: tokens.spacingHorizontalS }}>
+                <Button size="small" appearance="primary" icon={<AddRegular />} disabled={busy || !newUrl.trim()}
+                  onClick={() => void wrap(async () => {
+                    await api.sites.add({ url: newUrl.trim(), ...(newLabel.trim() ? { label: newLabel.trim() } : {}) });
+                    setNewUrl(''); setNewLabel(''); setAdding(false);
+                  })}>Add</Button>
+                <Button size="small" appearance="subtle" onClick={() => { setAdding(false); setNewUrl(''); setNewLabel(''); }}>Cancel</Button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <Button appearance="outline" icon={<AddRegular />} onClick={() => setAdding(true)} disabled={busy}>Add Site</Button>
+        )}
+      </div>
+    </Card>
+  );
+
+  function startEditRow(s: SiteConfig) {
+    setEditingId(s.id);
+    setDraft(siteToDraft(s));
+  }
 }
 
 export function ConfigPage() {
@@ -189,7 +432,6 @@ export function ConfigPage() {
     setErrorMsg(null);
     try {
       const body: PutConfigRequest = {
-        target: { url: draft.targetUrl.trim(), selector: draft.targetSelector.trim() },
         schedule: { intervalMs, runOnce: draft.runOnce },
         productWatchUrls: parseWatchUrls(draft.productWatchUrls),
       };
@@ -286,33 +528,10 @@ export function ConfigPage() {
 
       <Divider />
 
-      <div className={styles.cardGrid}>
-        {/* Target */}
-        <Card>
-          <CardHeader image={<GlobeRegular fontSize={20} />} header={<Title3>Target</Title3>} />
-          <div className={styles.fieldGroup}>
-            <Field label="URL" required>
-              <Input
-                value={draft.targetUrl}
-                onChange={(e) => setField('targetUrl', e.target.value)}
-                placeholder="https://example.com"
-                style={{ fontFamily: 'monospace' }}
-              />
-            </Field>
-            <Field label="CSS Selector">
-              <Input
-                value={draft.targetSelector}
-                onChange={(e) => setField('targetSelector', e.target.value)}
-                placeholder="(entire page)"
-                style={{ fontFamily: 'monospace' }}
-              />
-            </Field>
-            <Text className={styles.hintText}>
-              Leave selector blank to monitor the full page body.
-            </Text>
-          </div>
-        </Card>
+      {/* Tracked sites — managed via the sites CRUD API, independent of Save */}
+      <TrackedSites sites={saved.sites} onChanged={load} onError={setErrorMsg} />
 
+      <div className={styles.cardGrid}>
         {/* Product watch list */}
         <Card>
           <CardHeader

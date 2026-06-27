@@ -205,10 +205,12 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 
 ### Config page
 
-- **Target** — the URL to monitor and an optional CSS selector to focus on a specific part of the page
-- **Schedule** — check interval in seconds and run-once mode
+- **Tracked Sites** — add, edit, enable/disable, and remove the sites you monitor. Each site has its own URL, optional CSS selector, label, optional per-site check interval, and an optional **time-of-day schedule** (timezone + cadence windows, e.g. scrape Hermès every 2 min during the 6–11 AM PT drop window and hourly overnight). Site changes apply immediately (independent of Save). The last site can't be removed.
+- **Schedule** — global default check interval (seconds) and run-once mode, used by any site without its own interval/schedule
 - **Notifications** — Discord webhook URL (write-only, never echoed back)
 - **Browser** — read-only view of browser settings (set these in `config.json`)
+
+> **Multi-site:** the app monitors every enabled site independently — its own state, history, cadence, and Discord alerts. The Monitor page shows a site list; select a site to see its status. Existing single-site `config.json` files (with `targetUrl`) are migrated automatically into a one-element `sites` list.
 
 ---
 
@@ -216,8 +218,9 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 
 | Field | Default | Description |
 |---|---|---|
-| `targetUrl` | — | The page to monitor (required) |
-| `targetSelector` | `""` | CSS selector to focus on (e.g. `main`, `#prices`). Empty = full page |
+| `sites` | — | Array of tracked sites: `{ id, url, selector, enabled, label?, intervalMs?, schedule? }`. When present, supersedes `targetUrl`/`targetSelector`. Managed via the Config page or `/api/sites`. |
+| `targetUrl` | — | Single-site shorthand / backward-compat alias for `sites[0].url` (auto-migrated into `sites` on load) |
+| `targetSelector` | `""` | CSS selector to focus on (e.g. `main`, `#prices`). Empty = full page. Alias for `sites[0].selector` |
 | `checkIntervalMs` | `300000` | How often to check in ms (5 minutes) |
 | `runOnce` | `false` | Run one check and exit |
 | `discordWebhookUrl` | — | Discord webhook for alerts (required) |

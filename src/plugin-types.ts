@@ -1,5 +1,6 @@
 import type { Page } from 'playwright';
 import type { HistoryEntry } from './state.js';
+import type { SiteSchedule } from './config.js';
 
 export interface PluginDiff {
   hasChanges: boolean;
@@ -28,4 +29,9 @@ export interface SitePlugin {
   formatBaselineMessage(available: unknown[]): string;
   /** Render history entries as text for LLM prediction. Optional. */
   formatHistoryForPrediction?(history: HistoryEntry[]): string;
+  /**
+   * Default time-of-day scrape cadence intrinsic to this site, used when a
+   * site's own config omits a schedule. Optional.
+   */
+  suggestedSchedule?: SiteSchedule;
 }

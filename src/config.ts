@@ -19,9 +19,46 @@ export interface TargetConfig {
   selector: string;
 }
 
+/** A single time-of-day cadence band, evaluated in a site's timezone. */
+export interface ScheduleWindow {
+  startHour: number;   // 0–23, inclusive
+  endHour: number;     // 0–23, exclusive; may wrap past midnight (e.g. 22→6)
+  intervalMs: number;  // scrape cadence while inside this window
+}
+
+/** Optional per-site time-of-day-aware cadence. */
+export interface SiteSchedule {
+  timezone?: string;            // IANA tz for the windows; default 'America/Los_Angeles'
+  windows?: ScheduleWindow[];   // first matching window wins
+  intervalMs?: number;          // cadence when no window matches
+}
+
+/** One tracked site. The app monitors every enabled site independently. */
+export interface SiteConfig {
+  id: string;
+  url: string;
+  selector: string;
+  enabled: boolean;
+  label?: string;
+  intervalMs?: number;       // per-site override; falls back to schedule.intervalMs
+  schedule?: SiteSchedule;   // optional time-of-day-aware cadence
+}
+
 export interface ScheduleConfig {
   intervalMs: number;
   runOnce: boolean;
+}
+
+/** Derives a stable-ish site id: URL-host slug + short random suffix. */
+export function generateSiteId(url: string): string {
+  let host = 'site';
+  try {
+    host = new URL(url).hostname.replace(/^www\./, '').split('.')[0] || 'site';
+  } catch {
+    // non-URL input — fall back to the default slug
+  }
+  const slug = host.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'site';
+  return `${slug}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export interface BrowserConfig {
@@ -41,6 +78,9 @@ export interface NotificationsConfig {
 }
 
 export interface AppConfig {
+  /** All tracked sites. The monitor checks every enabled site independently. */
+  sites: SiteConfig[];
+  /** Backward-compat alias for sites[0] (kept in sync by ConfigStore). */
   target: TargetConfig;
   schedule: ScheduleConfig;
   browser: BrowserConfig;
@@ -201,8 +241,14 @@ export function getSafeConfig(config: AppConfig): SafeAppConfig {
 export function validateAppConfig(config: AppConfig): string[] {
   const errors: string[] = [];
 
-  if (!config.target.url.trim()) {
-    errors.push('targetUrl is required (set --targetUrl or targetUrl in config.json)');
+  const enabledSites = config.sites.filter((s) => s.enabled);
+  if (enabledSites.length === 0) {
+    errors.push('At least one enabled site is required (add a site / set targetUrl)');
+  }
+  for (const s of enabledSites) {
+    if (!s.url.trim()) {
+      errors.push(`Site '${s.label || s.id}' is enabled but has no URL`);
+    }
   }
   if (!config.notifications.discordWebhookUrl.trim()) {
     errors.push('discordWebhookUrl is required (set it in config.json)');
@@ -232,6 +278,8 @@ export function validateAppConfig(config: AppConfig): string[] {
 export interface JsonConfig {
   targetUrl?: string;
   targetSelector?: string;
+  /** Multi-site list. When present, supersedes targetUrl/targetSelector. */
+  sites?: SiteConfig[];
   checkIntervalMs?: number;
   runOnce?: boolean;
   discordWebhookUrl?: string;
@@ -347,6 +395,9 @@ export function saveJsonConfig(config: AppConfig, filePath = resolveConfigPath()
   const claude = config.llmProviders.find((p) => p.id === 'claude');
 
   const json: JsonConfig = {
+    // sites is the source of truth; targetUrl/targetSelector are kept as a
+    // sites[0] alias for backward compatibility with older single-site readers.
+    sites:              config.sites.length > 0 ? config.sites : undefined,
     targetUrl:          config.target.url,
     targetSelector:     config.target.selector,
     checkIntervalMs:    config.schedule.intervalMs,
@@ -424,6 +475,34 @@ function buildScheduleConfig(json: JsonConfig): ScheduleConfig {
   };
 }
 
+/**
+ * Resolves the tracked-site list. Prefers an explicit `sites` array; otherwise
+ * migrates the legacy single `targetUrl`/`targetSelector` into a one-element
+ * list. Returns [] when nothing is configured (lenient/fresh config).
+ */
+function buildSites(input: JsonConfig): SiteConfig[] {
+  if (input.sites && input.sites.length > 0) {
+    return input.sites.map((s) => ({
+      id: s.id || generateSiteId(s.url ?? ''),
+      url: s.url ?? '',
+      selector: s.selector ?? '',
+      enabled: s.enabled ?? true,
+      ...(s.label !== undefined ? { label: s.label } : {}),
+      ...(s.intervalMs !== undefined ? { intervalMs: s.intervalMs } : {}),
+      ...(s.schedule !== undefined ? { schedule: s.schedule } : {}),
+    }));
+  }
+  if ((input.targetUrl ?? '').trim()) {
+    return [{
+      id: generateSiteId(input.targetUrl as string),
+      url: input.targetUrl as string,
+      selector: input.targetSelector ?? '',
+      enabled: true,
+    }];
+  }
+  return [];
+}
+
 // ---------------------------------------------------------------------------
 // Typed AppConfig builder
 // ---------------------------------------------------------------------------
@@ -436,10 +515,13 @@ function buildScheduleConfig(json: JsonConfig): ScheduleConfig {
  * user can finish configuration via the UI.
  */
 export function buildAppConfig(input: JsonConfig, opts: { strict?: boolean } = {}): AppConfig {
+  const sites = buildSites(input);
+  const first = sites[0];
   const config: AppConfig = {
+    sites,
     target: {
-      url: input.targetUrl ?? '',
-      selector: input.targetSelector ?? '',
+      url: first?.url ?? '',
+      selector: first?.selector ?? '',
     },
     schedule: buildScheduleConfig(input),
     browser: buildBrowserConfig(input.browser),
@@ -502,10 +584,73 @@ export class ConfigStore {
     this.config = structuredClone(config);
   }
 
+  /** Keeps the target alias mirrored to sites[0]. */
+  private syncTarget(): void {
+    const first = this.config.sites[0];
+    this.config.target = first
+      ? { url: first.url, selector: first.selector }
+      : { url: '', selector: '' };
+  }
+
+  /** Returns the tracked sites. */
+  getSites(): SiteConfig[] {
+    return this.config.sites;
+  }
+
+  /** Adds a site (generating its id) and returns the created record. */
+  addSite(site: Omit<SiteConfig, 'id'>): SiteConfig {
+    const created: SiteConfig = { id: generateSiteId(site.url), ...site };
+    this.config.sites = [...this.config.sites, created];
+    this.syncTarget();
+    return created;
+  }
+
+  /** Patches an existing site by id; returns the updated record or null if unknown. */
+  updateSite(id: string, patch: Partial<Omit<SiteConfig, 'id'>>): SiteConfig | null {
+    const idx = this.config.sites.findIndex((s) => s.id === id);
+    if (idx < 0) return null;
+    this.config.sites[idx] = { ...this.config.sites[idx], ...patch };
+    this.syncTarget();
+    return this.config.sites[idx];
+  }
+
+  /** Removes a site by id. Refuses to remove the last site. */
+  removeSite(id: string): { ok: boolean; reason?: string } {
+    if (this.config.sites.length <= 1) {
+      return { ok: false, reason: 'Cannot remove the last site' };
+    }
+    const next = this.config.sites.filter((s) => s.id !== id);
+    if (next.length === this.config.sites.length) {
+      return { ok: false, reason: 'Unknown site id' };
+    }
+    this.config.sites = next;
+    this.syncTarget();
+    return { ok: true };
+  }
+
   /** Merge a partial config update (shallow merge per section). */
   update(updates: Partial<AppConfig>): void {
+    if (updates.sites) {
+      this.config.sites = updates.sites.map((s) => ({ ...s }));
+      this.syncTarget();
+    }
     if (updates.target) {
       this.config.target = { ...this.config.target, ...updates.target };
+      // Mirror the single-site target patch onto sites[0] (backward compat).
+      if (this.config.sites[0]) {
+        this.config.sites[0] = {
+          ...this.config.sites[0],
+          url: this.config.target.url,
+          selector: this.config.target.selector,
+        };
+      } else {
+        this.config.sites = [{
+          id: generateSiteId(this.config.target.url),
+          url: this.config.target.url,
+          selector: this.config.target.selector,
+          enabled: true,
+        }];
+      }
     }
     if (updates.schedule) {
       this.config.schedule = { ...this.config.schedule, ...updates.schedule };

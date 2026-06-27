@@ -15,6 +15,7 @@ import {
   KNOWN_PROVIDER_MODELS,
   type ConfigStore,
   type AppConfig,
+  type SiteConfig,
   type LlmProviderConfig,
   type LlmProviderId,
 } from './config.js';
@@ -36,6 +37,8 @@ import type {
   ValidateScrapeResponse,
   StartMonitorRequest,
   AskRequest,
+  CreateSiteRequest,
+  UpdateSiteRequest,
 } from './api-types.js';
 
 // ---------------------------------------------------------------------------
@@ -59,6 +62,7 @@ type ErrorCode =
   | 'ALREADY_RUNNING'
   | 'NOT_RUNNING'
   | 'PROVIDER_NOT_FOUND'
+  | 'NOT_FOUND'
   | 'TEST_FAILED'
   | 'SCRAPE_FAILED'
   | 'INTERNAL_ERROR';
@@ -220,6 +224,66 @@ export function createApiRouter(
     configStore.update(update);
     persistConfig(configStore.get());
     ok(res, configStore.getSafe());
+  });
+
+  // -------------------------------------------------------------------------
+  // Site CRUD — /api/sites
+  // -------------------------------------------------------------------------
+  router.get('/sites', (_req: Request, res: Response) => {
+    ok(res, configStore.getSites());
+  });
+
+  router.post('/sites', (req: Request, res: Response) => {
+    const body = req.body as CreateSiteRequest;
+    if (typeof body?.url !== 'string' || !body.url.trim()) {
+      return fail(res, 'VALIDATION_ERROR', '`url` is required.');
+    }
+    const created = configStore.addSite({
+      url: body.url.trim(),
+      selector: typeof body.selector === 'string' ? body.selector.trim() : '',
+      enabled: typeof body.enabled === 'boolean' ? body.enabled : true,
+      ...(typeof body.label === 'string' ? { label: body.label } : {}),
+      ...(typeof body.intervalMs === 'number' ? { intervalMs: body.intervalMs } : {}),
+      ...(body.schedule !== undefined ? { schedule: body.schedule } : {}),
+    });
+    persistConfig(configStore.get());
+    ok(res, created, 201);
+  });
+
+  router.get('/sites/:id', (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const site = configStore.getSites().find((s) => s.id === id);
+    if (!site) return fail(res, 'NOT_FOUND', `Unknown site id '${id}'.`, 404);
+    ok(res, site);
+  });
+
+  router.put('/sites/:id', (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const body = req.body as UpdateSiteRequest;
+    if (typeof body !== 'object' || body === null) {
+      return fail(res, 'VALIDATION_ERROR', 'Request body must be a JSON object.');
+    }
+    const patch: Partial<Omit<SiteConfig, 'id'>> = {};
+    if (typeof body.url === 'string') patch.url = body.url.trim();
+    if (typeof body.selector === 'string') patch.selector = body.selector.trim();
+    if (typeof body.label === 'string') patch.label = body.label;
+    if (typeof body.enabled === 'boolean') patch.enabled = body.enabled;
+    if (typeof body.intervalMs === 'number') patch.intervalMs = body.intervalMs;
+    if (body.schedule !== undefined) patch.schedule = body.schedule;
+    const updated = configStore.updateSite(id, patch);
+    if (!updated) return fail(res, 'NOT_FOUND', `Unknown site id '${id}'.`, 404);
+    persistConfig(configStore.get());
+    ok(res, updated);
+  });
+
+  router.delete('/sites/:id', (req: Request, res: Response) => {
+    const result = configStore.removeSite(String(req.params.id));
+    if (!result.ok) {
+      const isUnknown = result.reason === 'Unknown site id';
+      return fail(res, isUnknown ? 'NOT_FOUND' : 'VALIDATION_ERROR', result.reason ?? 'Cannot remove site.', isUnknown ? 404 : 422);
+    }
+    persistConfig(configStore.get());
+    ok(res, { removed: true });
   });
 
   // -------------------------------------------------------------------------

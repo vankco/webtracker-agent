@@ -31,7 +31,7 @@ import {
   TimerRegular,
 } from '@fluentui/react-icons';
 import { api, ApiError } from '../api/client.js';
-import type { MonitorStatus, ValidateScrapeResponse, ContentSnapshot } from '../api/types.js';
+import type { MultiSiteMonitorStatus, SiteStatusView, ValidateScrapeResponse, ContentSnapshot } from '../api/types.js';
 
 const useStyles = makeStyles({
   root: {
@@ -156,6 +156,39 @@ const useStyles = makeStyles({
     maxHeight: '200px',
     overflowY: 'auto',
   },
+  siteList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+  },
+  siteItem: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    cursor: 'pointer',
+    textAlign: 'left',
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  siteItemSelected: {
+    border: `1px solid ${tokens.colorBrandStroke1}`,
+    backgroundColor: tokens.colorNeutralBackground1Selected,
+  },
+  siteItemMain: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    overflow: 'hidden',
+  },
+  siteUrl: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    maxWidth: '420px',
+  },
 });
 
 function formatTime(iso: string | undefined): string {
@@ -175,7 +208,8 @@ export function MonitorPage() {
   const styles = useStyles();
 
   // Monitor status
-  const [status, setStatus] = useState<MonitorStatus | null>(null);
+  const [status, setStatus] = useState<MultiSiteMonitorStatus | null>(null);
+  const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -197,8 +231,11 @@ export function MonitorPage() {
       const s = await api.monitor.status();
       setStatus(s);
       setErrorMsg(null);
-      // Pre-fill scrape URL from status target if not already set by user
-      setScrapeUrl((prev) => prev || s.targetUrl || '');
+      const ids = Object.keys(s.sites);
+      // Keep the current selection if still valid; otherwise select the first site.
+      setSelectedSiteId((prev) => (prev && ids.includes(prev) ? prev : ids[0] ?? null));
+      // Pre-fill scrape URL from the (first) site if not already set by user
+      setScrapeUrl((prev) => prev || Object.values(s.sites)[0]?.url || '');
     } catch (err) {
       setErrorMsg(err instanceof ApiError ? err.message : 'Failed to load status.');
     } finally {
@@ -303,7 +340,17 @@ export function MonitorPage() {
   }
 
   const running = status?.running ?? false;
-  const lastResult = status?.lastResult;
+  const siteList: SiteStatusView[] = status ? Object.values(status.sites) : [];
+  const selectedSite: SiteStatusView | undefined =
+    (selectedSiteId ? status?.sites[selectedSiteId] : undefined) ?? siteList[0];
+  const lastResult = selectedSite?.lastResult;
+
+  const siteBadge = (s: SiteStatusView) => {
+    if (s.errors.length > 0) return <Badge appearance="filled" color="danger">error</Badge>;
+    if (s.lastResult?.changed) return <Badge appearance="filled" color="warning">changed</Badge>;
+    if (s.lastResult) return <Badge appearance="filled" color="success">no change</Badge>;
+    return <Badge appearance="outline" color="informative">idle</Badge>;
+  };
 
   return (
     <div className={styles.root}>
@@ -353,6 +400,39 @@ export function MonitorPage() {
 
       <Divider />
 
+      {/* Tracked sites */}
+      {siteList.length > 0 && (
+        <Card>
+          <CardHeader
+            header={
+              <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+                <Title3>Tracked Sites</Title3>
+                <Badge appearance="outline" color="informative">{siteList.length}</Badge>
+              </div>
+            }
+          />
+          <div className={styles.siteList}>
+            {siteList.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className={`${styles.siteItem} ${s.id === selectedSite?.id ? styles.siteItemSelected : ''}`}
+                onClick={() => setSelectedSiteId(s.id)}
+              >
+                <div className={styles.siteItemMain}>
+                  <Body1>{s.label || s.url}</Body1>
+                  <Caption1 className={`${styles.muted} ${styles.siteUrl}`} title={s.url}>{s.url}</Caption1>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS }}>
+                  {!s.enabled && <Badge appearance="outline" color="subtle">disabled</Badge>}
+                  {siteBadge(s)}
+                </div>
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {/* Stat cards */}
       <div className={styles.cardGrid}>
         <Card>
@@ -361,9 +441,9 @@ export function MonitorPage() {
               <ClockRegular style={{ verticalAlign: 'middle', marginRight: 4 }} />
               Last Check
             </Caption1>
-            <Title3 className={styles.statValue}>{formatTime(status?.lastCheck)}</Title3>
-            {status?.lastCheck && (
-              <Caption1 className={styles.muted}>{formatRelative(status.lastCheck)}</Caption1>
+            <Title3 className={styles.statValue}>{formatTime(selectedSite?.lastCheck)}</Title3>
+            {selectedSite?.lastCheck && (
+              <Caption1 className={styles.muted}>{formatRelative(selectedSite.lastCheck)}</Caption1>
             )}
           </div>
         </Card>
@@ -375,11 +455,11 @@ export function MonitorPage() {
               Next Check
             </Caption1>
             <Title3 className={styles.statValue}>
-              {running ? formatTime(status?.nextCheck) : '—'}
+              {running ? formatTime(selectedSite?.nextCheck) : '—'}
             </Title3>
-            {running && status?.nextCheck && (
+            {running && selectedSite?.nextCheck && (
               <Caption1 className={styles.muted}>
-                in {formatRelative(status.nextCheck).replace(' ago', '')}
+                in {formatRelative(selectedSite.nextCheck).replace(' ago', '')}
               </Caption1>
             )}
           </div>
@@ -387,13 +467,13 @@ export function MonitorPage() {
 
         <Card>
           <div className={styles.statCard}>
-            <Caption1 className={styles.muted}>Target URL</Caption1>
+            <Caption1 className={styles.muted}>Site URL</Caption1>
             <Body1
               className={styles.statValue}
               style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-              title={status?.targetUrl}
+              title={selectedSite?.url}
             >
-              {status?.targetUrl || '—'}
+              {selectedSite?.url || '—'}
             </Body1>
           </div>
         </Card>
@@ -435,18 +515,18 @@ export function MonitorPage() {
       )}
 
       {/* Errors */}
-      {status && status.errors.length > 0 && (
+      {selectedSite && selectedSite.errors.length > 0 && (
         <Card>
           <CardHeader
             header={
               <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
                 <Title3>Recent Errors</Title3>
-                <Badge appearance="filled" color="danger">{status.errors.length}</Badge>
+                <Badge appearance="filled" color="danger">{selectedSite.errors.length}</Badge>
               </div>
             }
           />
           <div className={styles.errorList}>
-            {[...status.errors].reverse().map((e, i) => (
+            {[...selectedSite.errors].reverse().map((e, i) => (
               <div key={i} className={styles.errorItem}>
                 <DismissCircleRegular
                   style={{ color: tokens.colorStatusDangerForeground1, flexShrink: 0, marginTop: 2 }}
@@ -472,11 +552,11 @@ export function MonitorPage() {
       )}
 
       {/* Recent content snapshots */}
-      {status && status.recentSnapshots.length > 0 && (
+      {selectedSite && selectedSite.recentSnapshots.length > 0 && (
         <Card>
           <CardHeader header={<Title3>Recent Fetched Content</Title3>} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
-            {status.recentSnapshots.slice(0, 1).map((snap: ContentSnapshot, i: number) => (
+            {selectedSite.recentSnapshots.slice(0, 1).map((snap: ContentSnapshot, i: number) => (
               <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: tokens.spacingHorizontalS }}>
                   <Caption1 style={{ color: tokens.colorNeutralForeground3 }}>

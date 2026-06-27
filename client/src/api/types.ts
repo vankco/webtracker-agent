@@ -35,7 +35,30 @@ export interface SafeLlmProviderConfig {
   maxRetries: number;
 }
 
+export interface ScheduleWindow {
+  startHour: number;
+  endHour: number;
+  intervalMs: number;
+}
+
+export interface SiteSchedule {
+  timezone?: string;
+  windows?: ScheduleWindow[];
+  intervalMs?: number;
+}
+
+export interface SiteConfig {
+  id: string;
+  url: string;
+  selector: string;
+  enabled: boolean;
+  label?: string;
+  intervalMs?: number;
+  schedule?: SiteSchedule;
+}
+
 export interface SafeAppConfig {
+  sites: SiteConfig[];
   target: { url: string; selector: string };
   schedule: { intervalMs: number; runOnce: boolean };
   browser: {
@@ -169,6 +192,45 @@ export interface MonitorStatus {
   targetUrl?: string;
   errors: MonitorError[];
   recentSnapshots: ContentSnapshot[];
+}
+
+export interface SiteStatus {
+  lastCheck?: string;
+  lastResult?: LastCheckResult;
+  nextCheck?: string;
+  errors: MonitorError[];
+  recentSnapshots: ContentSnapshot[];
+}
+
+export interface SiteStatusView extends SiteStatus {
+  id: string;
+  url: string;
+  label?: string;
+  enabled: boolean;
+}
+
+export interface MultiSiteMonitorStatus {
+  running: boolean;
+  nextCheck?: string;
+  sites: Record<string, SiteStatusView>;
+}
+
+export interface CreateSiteRequest {
+  url: string;
+  selector?: string;
+  label?: string;
+  enabled?: boolean;
+  intervalMs?: number;
+  schedule?: SiteSchedule;
+}
+
+export interface UpdateSiteRequest {
+  url?: string;
+  selector?: string;
+  label?: string;
+  enabled?: boolean;
+  intervalMs?: number;
+  schedule?: SiteSchedule;
 }
 
 export interface StartMonitorRequest {

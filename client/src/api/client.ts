@@ -15,7 +15,10 @@ import type {
   GetModelsResponse,
   TestProviderRequest,
   TestProviderResponse,
-  MonitorStatus,
+  MultiSiteMonitorStatus,
+  SiteConfig,
+  CreateSiteRequest,
+  UpdateSiteRequest,
   StartMonitorRequest,
   StartMonitorResponse,
   StopMonitorResponse,
@@ -94,7 +97,7 @@ export const api = {
   },
 
   monitor: {
-    status: (): Promise<MonitorStatus> =>
+    status: (): Promise<MultiSiteMonitorStatus> =>
       request('GET', '/monitor/status'),
 
     start: (body?: StartMonitorRequest): Promise<StartMonitorResponse> =>
@@ -102,6 +105,23 @@ export const api = {
 
     stop: (): Promise<StopMonitorResponse> =>
       request('POST', '/monitor/stop'),
+  },
+
+  sites: {
+    list: (): Promise<SiteConfig[]> =>
+      request('GET', '/sites'),
+
+    add: (body: CreateSiteRequest): Promise<SiteConfig> =>
+      request('POST', '/sites', body),
+
+    get: (id: string): Promise<SiteConfig> =>
+      request('GET', `/sites/${id}`),
+
+    update: (id: string, body: UpdateSiteRequest): Promise<SiteConfig> =>
+      request('PUT', `/sites/${id}`, body),
+
+    remove: (id: string): Promise<{ removed: boolean }> =>
+      request('DELETE', `/sites/${id}`),
   },
 
   validate: {

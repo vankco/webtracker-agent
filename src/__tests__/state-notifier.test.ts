@@ -14,7 +14,7 @@ vi.mock('fs', () => ({
 }));
 
 import * as fs from 'fs';
-import { loadState, saveState } from '../state.js';
+import { loadState, saveState, loadAllState, loadSiteState, saveSiteState } from '../state.js';
 import type { MonitorState } from '../state.js';
 
 const VALID_STATE: MonitorState = {
@@ -64,15 +64,51 @@ describe('saveState', () => {
     saveState(VALID_STATE);
     expect(fs.writeFileSync).toHaveBeenCalledOnce();
     const [, content] = vi.mocked(fs.writeFileSync).mock.calls[0] as [string, string, string];
-    const parsed = JSON.parse(content) as MonitorState;
-    expect(parsed.url).toBe(VALID_STATE.url);
-    expect(parsed.lastContent).toBe(VALID_STATE.lastContent);
+    // state.json is now a site-keyed map; the saved state is the first entry.
+    const parsed = JSON.parse(content) as Record<string, MonitorState>;
+    const entry = Object.values(parsed)[0];
+    expect(entry.url).toBe(VALID_STATE.url);
+    expect(entry.lastContent).toBe(VALID_STATE.lastContent);
   });
 
   it('writes to a .json file path', () => {
     saveState(VALID_STATE);
     const [filePath] = vi.mocked(fs.writeFileSync).mock.calls[0] as [string, string, string];
     expect(filePath).toMatch(/\.json$/);
+  });
+});
+
+describe('multi-site state helpers', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('loadAllState migrates a legacy single-object file into a site-keyed map', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(VALID_STATE));
+    const map = await loadAllState();
+    const entries = Object.values(map);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].url).toBe(VALID_STATE.url);
+  });
+
+  it('loadSiteState falls back to matching by url', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ 'legacy-xyz': VALID_STATE }));
+    const found = await loadSiteState('different-id', VALID_STATE.url);
+    expect(found?.url).toBe(VALID_STATE.url);
+    const missing = await loadSiteState('different-id', 'https://nope.example.com');
+    expect(missing).toBeNull();
+  });
+
+  it('saveSiteState re-keys by id and drops stale url duplicates', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ 'old-key': VALID_STATE }));
+    await saveSiteState('new-key', { ...VALID_STATE, lastContent: 'updated' });
+    const [, content] = vi.mocked(fs.writeFileSync).mock.calls[0] as [string, string, string];
+    const parsed = JSON.parse(content) as Record<string, MonitorState>;
+    expect(Object.keys(parsed)).toEqual(['new-key']);
+    expect(parsed['new-key'].lastContent).toBe('updated');
   });
 });
 

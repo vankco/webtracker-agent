@@ -10,6 +10,8 @@ import type {
   SafeLlmProviderConfig,
   LlmProviderId,
   BrowserConfig,
+  SiteConfig,
+  SiteSchedule,
 } from './config.js';
 import type { AnalysisResult } from './analyzer.js';
 
@@ -197,6 +199,56 @@ export interface MonitorStatus {
   /** Last 2 fetched content snapshots, newest first. */
   recentSnapshots: ContentSnapshot[];
 }
+
+/** Per-site monitoring status (the multi-site replacement for MonitorStatus fields). */
+export interface SiteStatus {
+  lastCheck?: string;
+  lastResult?: LastCheckResult;
+  nextCheck?: string;
+  errors: MonitorError[];
+  recentSnapshots: ContentSnapshot[];
+}
+
+/** A site's status enriched with its identity for the UI. */
+export interface SiteStatusView extends SiteStatus {
+  id: string;
+  url: string;
+  label?: string;
+  enabled: boolean;
+}
+
+export interface MultiSiteMonitorStatus {
+  running: boolean;
+  /** Earliest upcoming check across all sites, if running. */
+  nextCheck?: string;
+  /** Per-site status keyed by site id. */
+  sites: Record<string, SiteStatusView>;
+}
+
+// ---------------------------------------------------------------------------
+// Site CRUD — /api/sites
+// ---------------------------------------------------------------------------
+
+export interface CreateSiteRequest {
+  url: string;
+  selector?: string;
+  label?: string;
+  enabled?: boolean;
+  intervalMs?: number;
+  schedule?: SiteSchedule;
+}
+
+export interface UpdateSiteRequest {
+  url?: string;
+  selector?: string;
+  label?: string;
+  enabled?: boolean;
+  intervalMs?: number;
+  schedule?: SiteSchedule;
+}
+
+export type SiteResponse = SiteConfig;
+export type ListSitesResponse = SiteConfig[];
 
 // ---------------------------------------------------------------------------
 // GET /api/logs
