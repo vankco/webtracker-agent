@@ -5,6 +5,7 @@ state.json
 logs.jsonl
 .browser-profile*/
 config.json
+config.json.bak
 coverage/
 .vscode/
 debug/

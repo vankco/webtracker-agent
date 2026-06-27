@@ -1,6 +1,8 @@
 /**
  * monitor-controller.ts
- * Manages the monitor loop lifecycle: start, stop, one-shot run, status.
+ * Multi-site monitor loop: every enabled site is scraped independently on its
+ * own cadence, with its own state, status, and Discord alerts. A single
+ * recursive setTimeout drives a scheduler tick that runs whichever sites are due.
  * Designed to be injectable so the API server and CLI share the same instance.
  */
 
@@ -11,20 +13,24 @@ const PRODUCT_ALERT_USERNAME = 'Hermès Monitor';
 import type { SitePlugin } from './plugin-types.js';
 import { PluginRegistry } from './plugin-registry.js';
 import { sendDiscordAlert } from './notifier.js';
-import { loadState, saveState, appendHistory, type HistoryEntry } from './state.js';
+import { loadSiteState, saveSiteState, appendHistory, type HistoryEntry } from './state.js';
 import { analyzeWithProviders, type AnalysisResultWithMeta } from './llm.js';
 import {
   getEnabledProvidersByPriority,
   type AppConfig,
   type ConfigStore,
+  type SiteConfig,
+  type SiteSchedule,
+  type ScheduleConfig,
 } from './config.js';
 import { log } from './logger.js';
 import { getErrorMessage } from './utils.js';
 import type {
-  MonitorStatus,
   LastCheckResult,
   MonitorError,
   ContentSnapshot,
+  MultiSiteMonitorStatus,
+  SiteStatusView,
 } from './api-types.js';
 
 // ---------------------------------------------------------------------------
@@ -35,8 +41,8 @@ export interface MonitorDependencies {
   scrapePageText: typeof scrapePageText;
   analyzeWithProviders: typeof analyzeWithProviders;
   sendDiscordAlert: typeof sendDiscordAlert;
-  loadState: typeof loadState;
-  saveState: typeof saveState;
+  loadSiteState: typeof loadSiteState;
+  saveSiteState: typeof saveSiteState;
   closeScraperSession: typeof closeScraperSession;
 }
 
@@ -44,28 +50,80 @@ const DEFAULT_DEPS: MonitorDependencies = {
   scrapePageText,
   analyzeWithProviders,
   sendDiscordAlert,
-  loadState,
-  saveState,
+  loadSiteState,
+  saveSiteState,
   closeScraperSession,
 };
 
-// Maximum number of recent errors kept in memory
+// Maximum number of recent errors kept in memory, per site
 const MAX_ERRORS = 20;
+// Scheduler tick bounds — how soon/late we re-evaluate which sites are due
+const MIN_TICK_MS = 500;
+const MAX_TICK_MS = 60_000;
+
+/** Per-site runtime status held in memory. */
+interface SiteRuntime {
+  lastCheck?: string;
+  lastResult?: LastCheckResult;
+  nextCheck?: string;
+  /** Epoch ms when this site is next due. 0 = due immediately. */
+  nextCheckAt: number;
+  /** Apply 2× interval after an empty scrape (possible bot block). */
+  emptyBackoff: boolean;
+  errors: MonitorError[];
+  recentSnapshots: ContentSnapshot[];
+}
+
+// ---------------------------------------------------------------------------
+// Interval resolution (site schedule > plugin default > site interval > global)
+// ---------------------------------------------------------------------------
+
+/** Returns the matching interval from a schedule, or null if it doesn't decide. */
+function pickFromSchedule(sched: SiteSchedule | undefined, nowMs: number): number | null {
+  if (!sched) return null;
+  if (sched.windows && sched.windows.length > 0) {
+    const tz = sched.timezone ?? 'America/Los_Angeles';
+    const hour = Number(
+      new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', hourCycle: 'h23' })
+        .format(new Date(nowMs)),
+    );
+    for (const w of sched.windows) {
+      const inWindow = w.startHour <= w.endHour
+        ? hour >= w.startHour && hour < w.endHour          // normal band
+        : hour >= w.startHour || hour < w.endHour;         // wraps past midnight
+      if (inWindow) return w.intervalMs;
+    }
+  }
+  return sched.intervalMs ?? null;
+}
+
+/**
+ * Resolves a site's current scrape interval (ms), most-specific first:
+ *   site.schedule (windows → default) > plugin.suggestedSchedule > site.intervalMs > global.
+ */
+export function resolveIntervalMs(
+  site: SiteConfig,
+  plugin: SitePlugin | null,
+  globalSchedule: ScheduleConfig,
+  nowMs: number,
+): number {
+  const fromSite = pickFromSchedule(site.schedule, nowMs);
+  if (fromSite != null) return fromSite;
+  const fromPlugin = pickFromSchedule(plugin?.suggestedSchedule, nowMs);
+  if (fromPlugin != null) return fromPlugin;
+  if (site.intervalMs != null) return site.intervalMs;
+  return globalSchedule.intervalMs;
+}
 
 // ---------------------------------------------------------------------------
 // MonitorController
 // ---------------------------------------------------------------------------
 
 export class MonitorController {
-  private intervalHandle: ReturnType<typeof setInterval> | null = null;
+  private tickHandle: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private shuttingDown = false;
-  private lastCheck: string | undefined;
-  private lastResult: LastCheckResult | undefined;
-  private nextCheck: string | undefined;
-  private recentErrors: MonitorError[] = [];
-  private recentSnapshots: ContentSnapshot[] = [];
-  private emptyBackoff = false; // apply 2x interval after an empty scrape (possible bot block)
+  private readonly siteStatus = new Map<string, SiteRuntime>();
   private readonly deps: MonitorDependencies;
   private readonly registry: PluginRegistry;
 
@@ -87,17 +145,31 @@ export class MonitorController {
     return this.registry.findForUrl(url);
   }
 
-  getStatus(configStore: ConfigStore): MonitorStatus {
+  getStatus(configStore: ConfigStore): MultiSiteMonitorStatus {
     const config = configStore.get();
-    return {
-      running: this.running,
-      lastCheck: this.lastCheck,
-      lastResult: this.lastResult,
-      nextCheck: this.nextCheck,
-      targetUrl: config.target.url || undefined,
-      errors: [...this.recentErrors],
-      recentSnapshots: [...this.recentSnapshots],
-    };
+    const sites: Record<string, SiteStatusView> = {};
+    for (const s of config.sites) {
+      const st = this.siteStatus.get(s.id);
+      sites[s.id] = {
+        id: s.id,
+        url: s.url,
+        ...(s.label !== undefined ? { label: s.label } : {}),
+        enabled: s.enabled,
+        ...(st?.lastCheck !== undefined ? { lastCheck: st.lastCheck } : {}),
+        ...(st?.lastResult !== undefined ? { lastResult: st.lastResult } : {}),
+        ...(st?.nextCheck !== undefined ? { nextCheck: st.nextCheck } : {}),
+        errors: st ? [...st.errors] : [],
+        recentSnapshots: st ? [...st.recentSnapshots] : [],
+      };
+    }
+    const upcoming = config.sites
+      .filter((s) => s.enabled)
+      .map((s) => this.siteStatus.get(s.id)?.nextCheckAt)
+      .filter((n): n is number => typeof n === 'number' && n > Date.now());
+    const nextCheck = this.running && upcoming.length > 0
+      ? new Date(Math.min(...upcoming)).toISOString()
+      : undefined;
+    return { running: this.running, ...(nextCheck ? { nextCheck } : {}), sites };
   }
 
   /** Start the monitor loop. Throws if already running or config is invalid. */
@@ -105,7 +177,6 @@ export class MonitorController {
     if (this.running) {
       throw new Error('Monitor is already running.');
     }
-
     const validationErrors = configStore.validate();
     if (validationErrors.length > 0) {
       throw new Error(`Cannot start monitor — configuration is incomplete: ${validationErrors.join('; ')}`);
@@ -114,135 +185,176 @@ export class MonitorController {
     this.running = true;
     this.shuttingDown = false;
     const config = configStore.get();
-    log('info', 'monitor', 'Monitor started', { url: config.target.url, intervalMs: config.schedule.intervalMs });
+    const enabledCount = config.sites.filter((s) => s.enabled).length;
+    log('info', 'monitor', 'Monitor started', { sites: enabledCount, intervalMs: config.schedule.intervalMs });
 
-    // Run immediately
-    try {
-      await this.runCheck(config);
-    } catch (err) {
-      this.recordError(err);
-      if (!this.shuttingDown) {
-        log('error', 'monitor', 'Initial check failed', { error: getErrorMessage(err) });
-      }
-    }
+    // Run every enabled site once immediately (each runtime defaults to due).
+    await this.runDueSites(configStore);
 
     if (config.schedule.runOnce) {
       this.running = false;
       return;
     }
-
-    const scheduleLoop = (): void => {
-      const currentConfig = configStore.get();
-      const base = currentConfig.schedule.intervalMs;
-      // 2x interval after an empty scrape (possible bot block); ±20% jitter otherwise
-      const multiplier = this.emptyBackoff ? 2 : 1;
-      this.emptyBackoff = false;
-      const jitter = base * 0.2;
-      const next = Math.round(base * multiplier + (Math.random() * 2 - 1) * jitter);
-      if (multiplier > 1) log('warn', 'monitor', `Empty scrape backoff — next check in ${Math.round(next / 1000)}s`);
-      this.scheduleNext(next);
-      this.intervalHandle = setTimeout(async () => {
-        if (!this.running) return;
-        try {
-          await this.runCheck(configStore.get());
-        } catch (err) {
-          this.recordError(err);
-          console.error('[monitor] Check failed:', err);
-        }
-        if (this.running) scheduleLoop();
-      }, next) as unknown as ReturnType<typeof setInterval>;
-    };
-
-    this.scheduleNext(config.schedule.intervalMs);
-    scheduleLoop();
+    this.scheduleTick(configStore);
   }
 
   /** Stop the monitor loop and close the browser session. */
   async stop(): Promise<void> {
     this.shuttingDown = true;
-    if (this.intervalHandle != null) {
-      clearInterval(this.intervalHandle);
-      this.intervalHandle = null;
+    if (this.tickHandle != null) {
+      clearTimeout(this.tickHandle);
+      this.tickHandle = null;
     }
     this.running = false;
-    this.nextCheck = undefined;
+    for (const st of this.siteStatus.values()) st.nextCheck = undefined;
     log('info', 'monitor', 'Monitor stopped');
     await this.deps.closeScraperSession();
   }
 
   /**
-   * Run a single check cycle without starting the loop.
-   * Used by POST /api/monitor/start with runOnce=true and POST /api/validate/scrape.
+   * Run a single check cycle for every enabled site without starting the loop.
+   * Returns the first site's result (used by runOnce-mode start).
    */
   async runOnce(config: AppConfig): Promise<LastCheckResult | undefined> {
-    await this.runCheck(config);
-    return this.lastResult;
+    for (const site of config.sites.filter((s) => s.enabled)) {
+      try {
+        await this.runCheckForSite(site, config);
+      } catch (err) {
+        this.recordError(site.id, err);
+      }
+    }
+    const first = config.sites.find((s) => s.enabled);
+    return first ? this.siteStatus.get(first.id)?.lastResult : undefined;
   }
 
   // -------------------------------------------------------------------------
-  // Internal
+  // Internal — scheduling
   // -------------------------------------------------------------------------
 
-  private scheduleNext(intervalMs: number): void {
-    this.nextCheck = new Date(Date.now() + intervalMs).toISOString();
+  private ensureRuntime(siteId: string): SiteRuntime {
+    let st = this.siteStatus.get(siteId);
+    if (!st) {
+      st = { nextCheckAt: 0, emptyBackoff: false, errors: [], recentSnapshots: [] };
+      this.siteStatus.set(siteId, st);
+    }
+    return st;
   }
 
-  private async runCheck(config: AppConfig): Promise<void> {
-    const { target, browser } = config;
+  private scheduleTick(configStore: ConfigStore): void {
+    if (!this.running) return;
+    const config = configStore.get();
+    const now = Date.now();
+    const dueTimes = config.sites
+      .filter((s) => s.enabled)
+      .map((s) => this.ensureRuntime(s.id).nextCheckAt);
+    const soonest = dueTimes.length > 0 ? Math.min(...dueTimes) : now + MAX_TICK_MS;
+    const delay = Math.min(MAX_TICK_MS, Math.max(MIN_TICK_MS, soonest - now));
+    this.tickHandle = setTimeout(() => {
+      void (async () => {
+        if (!this.running) return;
+        await this.runDueSites(configStore);
+        if (this.running) this.scheduleTick(configStore);
+      })();
+    }, delay);
+  }
+
+  private async runDueSites(configStore: ConfigStore): Promise<void> {
+    const config = configStore.get();
+    // Drop runtime for sites that no longer exist.
+    const liveIds = new Set(config.sites.map((s) => s.id));
+    for (const id of [...this.siteStatus.keys()]) {
+      if (!liveIds.has(id)) this.siteStatus.delete(id);
+    }
+    // Run each due, enabled site sequentially (one browser context at a time).
+    for (const site of config.sites.filter((s) => s.enabled)) {
+      if (!this.running) return;
+      const st = this.ensureRuntime(site.id);
+      if (st.nextCheckAt > Date.now()) continue;
+      try {
+        await this.runCheckForSite(site, config);
+      } catch (err) {
+        this.recordError(site.id, err);
+        if (!this.shuttingDown) {
+          console.error(`[monitor] Check failed for ${site.url}:`, err);
+        }
+      }
+      this.scheduleNextForSite(site, config);
+    }
+  }
+
+  private scheduleNextForSite(site: SiteConfig, config: AppConfig): void {
+    const st = this.ensureRuntime(site.id);
+    const plugin = this.registry.findForUrl(site.url);
+    const base = resolveIntervalMs(site, plugin, config.schedule, Date.now());
+    const multiplier = st.emptyBackoff ? 2 : 1;
+    st.emptyBackoff = false;
+    const jitter = base * 0.2;
+    const interval = Math.max(1_000, Math.round(base * multiplier + (Math.random() * 2 - 1) * jitter));
+    if (multiplier > 1) {
+      log('warn', 'monitor', `Empty scrape backoff — next check in ${Math.round(interval / 1000)}s`, { url: site.url });
+    }
+    st.nextCheckAt = Date.now() + interval;
+    st.nextCheck = new Date(st.nextCheckAt).toISOString();
+  }
+
+  // -------------------------------------------------------------------------
+  // Internal — per-site check
+  // -------------------------------------------------------------------------
+
+  private async runCheckForSite(site: SiteConfig, config: AppConfig): Promise<void> {
+    const { browser } = config;
+    const st = this.ensureRuntime(site.id);
     const providers = getEnabledProvidersByPriority(config);
-    const plugin: SitePlugin | null = this.registry.findForUrl(target.url);
+    const plugin: SitePlugin | null = this.registry.findForUrl(site.url);
 
-    log('info', 'scrape', `Fetching`, { url: target.url, selector: target.selector || '(none)', plugin: plugin?.name ?? 'none' });
+    const intervalMs = resolveIntervalMs(site, plugin, config.schedule, Date.now());
+    log('info', 'scrape', `Fetching`, { url: site.url, selector: site.selector || '(none)', plugin: plugin?.name ?? 'none', intervalMs });
     const scrapeStart = Date.now();
 
-    const currentContent = await this.deps.scrapePageText(target.url, target.selector, browser, plugin ?? undefined, config.productWatchUrls);
+    const currentContent = await this.deps.scrapePageText(site.url, site.selector, browser, plugin ?? undefined, config.productWatchUrls);
 
-    // For plugin URLs: parse structured products and derive available subset
     const currentProducts: unknown[] | null = plugin
-      ? currentContent.split('\n').filter(Boolean).map(line => plugin.parseProductLine(line))
+      ? currentContent.split('\n').filter(Boolean).map((line) => plugin.parseProductLine(line))
       : null;
-    const currentAvailable: unknown[] = plugin
-      ? plugin.filterAvailable(currentProducts!)
-      : [];
+    const currentAvailable: unknown[] = plugin ? plugin.filterAvailable(currentProducts!) : [];
 
     log('info', 'scrape', `Fetch complete`, {
-      url: target.url,
+      url: site.url,
       contentLength: currentContent.length,
       latencyMs: Date.now() - scrapeStart,
       ...(plugin ? { totalProducts: currentProducts!.length, availableProducts: currentAvailable.length } : {}),
     });
 
-    // Record snapshot (keep only the latest)
-    this.recentSnapshots = [
+    st.recentSnapshots = [
       { fetchedAt: new Date().toISOString(), preview: currentContent.slice(0, 500), contentLength: currentContent.length },
     ];
 
     if (!currentContent.trim()) {
-      const msg = target.selector
-        ? `Scrape returned empty content — selector "${target.selector}" may not match anything on ${target.url}`
-        : `Scrape returned empty content — ${target.url} may have blocked the request or failed to load`;
-      log('warn', 'scrape', msg, { url: target.url, selector: target.selector });
-      this.recordError(new Error(msg));
-      this.emptyBackoff = true;
-      this.lastCheck = new Date().toISOString();
+      const msg = site.selector
+        ? `Scrape returned empty content — selector "${site.selector}" may not match anything on ${site.url}`
+        : `Scrape returned empty content — ${site.url} may have blocked the request or failed to load`;
+      log('warn', 'scrape', msg, { url: site.url, selector: site.selector });
+      this.recordError(site.id, new Error(msg));
+      st.emptyBackoff = true;
+      st.lastCheck = new Date().toISOString();
       return;
     }
 
-    const previousState = this.deps.loadState();
+    const previousState = await this.deps.loadSiteState(site.id, site.url);
 
     if (!previousState) {
       if (plugin && config.notifications.discordWebhookUrl) {
         const alertBody = plugin.formatBaselineMessage(currentAvailable);
         const chunks = chunkSummaryForAlerts(alertBody);
         for (const chunk of chunks) {
-          await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk, undefined, undefined, PRODUCT_ALERT_USERNAME, PRODUCT_ALERT_AVATAR);
+          await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, site.url, chunk, undefined, undefined, PRODUCT_ALERT_USERNAME, PRODUCT_ALERT_AVATAR);
         }
-        log('info', 'monitor', 'Baseline alert sent', { available: currentAvailable.length });
+        log('info', 'monitor', 'Baseline alert sent', { url: site.url, available: currentAvailable.length });
       } else {
-        log('info', 'monitor', 'No previous state — saving baseline. Alerts start next run.');
+        log('info', 'monitor', 'No previous state — saving baseline. Alerts start next run.', { url: site.url });
       }
-      this.deps.saveState({
-        url: target.url,
+      await this.deps.saveSiteState(site.id, {
+        url: site.url,
         lastContent: currentContent,
         lastChecked: new Date().toISOString(),
         ...(plugin ? { lastProducts: currentProducts! } : {}),
@@ -257,32 +369,29 @@ export class MonitorController {
             }
           : {}),
       });
-      this.lastCheck = new Date().toISOString();
+      st.lastCheck = new Date().toISOString();
       return;
     }
 
-    // Resolve previous available products from stored array or parse from text (legacy fallback)
     const previousAvailable: unknown[] = plugin
       ? previousState.lastProducts
         ? plugin.filterAvailable(previousState.lastProducts)
-        : previousState.lastContent.split('\n').filter(Boolean).map(line => plugin.parseProductLine(line)).filter((p: unknown) => plugin.filterAvailable([p]).length > 0)
+        : previousState.lastContent.split('\n').filter(Boolean).map((line) => plugin.parseProductLine(line)).filter((p: unknown) => plugin.filterAvailable([p]).length > 0)
       : [];
 
-    // Serialize available products to text for comparison
-    const currentTrackable  = plugin ? plugin.productsToText(currentAvailable)  : currentContent;
+    const currentTrackable = plugin ? plugin.productsToText(currentAvailable) : currentContent;
     const previousTrackable = plugin ? plugin.productsToText(previousAvailable) : previousState.lastContent;
 
     if (currentTrackable === previousTrackable) {
-      // No change — carry history forward unchanged (don't append a new event)
-      this.deps.saveState({
-        url: target.url,
+      await this.deps.saveSiteState(site.id, {
+        url: site.url,
         lastContent: currentContent,
         lastChecked: new Date().toISOString(),
         ...(plugin ? { lastProducts: currentProducts! } : {}),
         ...(previousState.history ? { history: previousState.history } : {}),
       });
-      this.lastCheck = new Date().toISOString();
-      this.lastResult = {
+      st.lastCheck = new Date().toISOString();
+      st.lastResult = {
         changed: false,
         summary: plugin
           ? `No change in available products (${currentAvailable.length} available).`
@@ -298,31 +407,24 @@ export class MonitorController {
     // -----------------------------------------------------------------------
     if (plugin) {
       const pluginDiff = plugin.diff(previousAvailable, currentAvailable);
-
-      log('info', 'monitor', 'Change detected (plugin)', { plugin: plugin.name, summary: pluginDiff.summary });
+      log('info', 'monitor', 'Change detected (plugin)', { url: site.url, plugin: plugin.name, summary: pluginDiff.summary });
 
       let finalSummary = pluginDiff.summary;
-
       if (pluginDiff.requestLlmFallback && providers.length > 0) {
-        const llmResult = await this.deps.analyzeWithProviders(target.url, previousTrackable, currentTrackable, providers);
+        const llmResult = await this.deps.analyzeWithProviders(site.url, previousTrackable, currentTrackable, providers);
         if (llmResult.summary) finalSummary += `\n\n${llmResult.summary}`;
       }
 
-      this.lastCheck = new Date().toISOString();
-      this.lastResult = {
-        changed: pluginDiff.hasChanges,
-        summary: finalSummary,
-        provider: 'deterministic',
-        fallback: false,
-      };
+      st.lastCheck = new Date().toISOString();
+      st.lastResult = { changed: pluginDiff.hasChanges, summary: finalSummary, provider: 'deterministic', fallback: false };
 
       if (pluginDiff.hasChanges && config.notifications.discordWebhookUrl) {
         const chunks = chunkSummaryForAlerts(pluginDiff.alertBody);
         const linkLabel = `📊 ${currentAvailable.length} available total`;
         for (const chunk of chunks) {
-          await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk, undefined, linkLabel, PRODUCT_ALERT_USERNAME, PRODUCT_ALERT_AVATAR);
+          await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, site.url, chunk, undefined, linkLabel, PRODUCT_ALERT_USERNAME, PRODUCT_ALERT_AVATAR);
         }
-        log('info', 'monitor', `${chunks.length} alert(s) sent`, { summary: finalSummary });
+        log('info', 'monitor', `${chunks.length} alert(s) sent`, { url: site.url, summary: finalSummary });
       }
 
       const historyEntry: HistoryEntry = {
@@ -331,8 +433,8 @@ export class MonitorController {
         availableCount: currentAvailable.length,
         changeSummary: pluginDiff.summary,
       };
-      this.deps.saveState({
-        url: target.url,
+      await this.deps.saveSiteState(site.id, {
+        url: site.url,
         lastContent: currentContent,
         lastChecked: new Date().toISOString(),
         lastProducts: currentProducts!,
@@ -345,20 +447,22 @@ export class MonitorController {
     // General: LLM-based change detection
     // -----------------------------------------------------------------------
     log('info', 'llm', 'Sending to LLM providers', {
-      providers: providers.map(p => `${p.id}:${p.model}`),
+      url: site.url,
+      providers: providers.map((p) => `${p.id}:${p.model}`),
       oldLength: previousTrackable.length,
       newLength: currentTrackable.length,
     });
     const llmStart = Date.now();
 
     const analysisResult: AnalysisResultWithMeta = await this.deps.analyzeWithProviders(
-      target.url,
+      site.url,
       previousTrackable,
       currentTrackable,
-      providers
+      providers,
     );
 
     log(analysisResult.fallback ? 'warn' : 'info', 'llm', `Analysis complete`, {
+      url: site.url,
       provider: analysisResult.provider ?? 'local-fallback',
       model: analysisResult.model,
       changed: analysisResult.changed,
@@ -367,8 +471,8 @@ export class MonitorController {
       summary: analysisResult.summary.slice(0, 200),
     });
 
-    this.lastCheck = new Date().toISOString();
-    this.lastResult = {
+    st.lastCheck = new Date().toISOString();
+    st.lastResult = {
       changed: analysisResult.changed,
       summary: analysisResult.summary,
       provider: analysisResult.provider ?? 'local',
@@ -380,34 +484,31 @@ export class MonitorController {
     if (analysisResult.changed) {
       const chunks = chunkSummaryForAlerts(analysisResult.summary);
       for (const chunk of chunks) {
-        await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, target.url, chunk, undefined, undefined, PRODUCT_ALERT_USERNAME, PRODUCT_ALERT_AVATAR);
+        await this.deps.sendDiscordAlert(config.notifications.discordWebhookUrl, site.url, chunk, undefined, undefined, PRODUCT_ALERT_USERNAME, PRODUCT_ALERT_AVATAR);
       }
-      console.log(`[monitor] Change detected — ${chunks.length} alert(s) sent ✓`);
+      console.log(`[monitor] Change detected (${site.url}) — ${chunks.length} alert(s) sent ✓`);
     } else {
-      console.log(`[monitor] No meaningful change: ${analysisResult.summary}`);
+      console.log(`[monitor] No meaningful change (${site.url}): ${analysisResult.summary}`);
     }
 
-    this.deps.saveState({
-      url: target.url,
+    await this.deps.saveSiteState(site.id, {
+      url: site.url,
       lastContent: currentContent,
       lastChecked: new Date().toISOString(),
     });
   }
 
-  private recordError(err: unknown): void {
+  private recordError(siteId: string, err: unknown): void {
     const message = getErrorMessage(err);
-
     // A check interrupted by a deliberate shutdown isn't a real failure —
     // log it quietly (info) so it doesn't fire a Discord error alert.
     if (this.shuttingDown) {
       log('info', 'monitor', `Check interrupted during shutdown: ${message}`);
       return;
     }
-
-    this.recentErrors.push({ timestamp: new Date().toISOString(), message });
-    if (this.recentErrors.length > MAX_ERRORS) {
-      this.recentErrors.shift();
-    }
+    const st = this.ensureRuntime(siteId);
+    st.errors.push({ timestamp: new Date().toISOString(), message });
+    if (st.errors.length > MAX_ERRORS) st.errors.shift();
     log('error', 'monitor', message);
   }
 }

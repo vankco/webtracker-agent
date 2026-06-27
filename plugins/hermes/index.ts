@@ -22,6 +22,18 @@ interface HistoryEntry {
   changeSummary: string;
 }
 
+interface ScheduleWindow {
+  startHour: number;
+  endHour: number;
+  intervalMs: number;
+}
+
+interface SiteSchedule {
+  timezone?: string;
+  windows?: ScheduleWindow[];
+  intervalMs?: number;
+}
+
 interface SitePlugin {
   name: string;
   matches(url: string): boolean;
@@ -32,6 +44,7 @@ interface SitePlugin {
   diff(oldProducts: unknown[], newProducts: unknown[]): PluginDiff;
   formatBaselineMessage(available: unknown[]): string;
   formatHistoryForPrediction?(history: HistoryEntry[]): string;
+  suggestedSchedule?: SiteSchedule;
 }
 
 // ---------------------------------------------------------------------------
@@ -727,6 +740,19 @@ const hermesPlugin: SitePlugin = {
 
   formatHistoryForPrediction(history: HistoryEntry[]): string {
     return formatHermesHistory(history);
+  },
+
+  // Hermès releases US inventory in the early-morning Pacific hours (history
+  // shows ~70% of all changes 06:00–11:00 PT, a weaker bump ~14:00–15:00, and a
+  // near-dead overnight). Scrape hard in the morning, easy the rest of the day.
+  suggestedSchedule: {
+    timezone: 'America/Los_Angeles',
+    intervalMs: 30 * 60_000, // fallback when no window matches
+    windows: [
+      { startHour: 6, endHour: 11, intervalMs: 120_000 },   // peak morning drops — aggressive
+      { startHour: 11, endHour: 16, intervalMs: 600_000 },  // afternoon bump — moderate
+      { startHour: 16, endHour: 6, intervalMs: 45 * 60_000 }, // overnight — sparse (wraps midnight)
+    ],
   },
 };
 

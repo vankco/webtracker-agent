@@ -26,6 +26,16 @@ cheap now and free later.
 ## Step 1 — Config: `src/config.ts`
 Add `SiteConfig`:
 ```typescript
+export interface ScheduleWindow {
+  startHour: number;     // 0–23, inclusive (in the site's timezone)
+  endHour: number;       // 0–23, exclusive; may wrap past midnight (e.g. 22→6)
+  intervalMs: number;    // scrape cadence while inside this window
+}
+export interface SiteSchedule {
+  timezone?: string;     // IANA tz for the windows, e.g. 'America/Los_Angeles'. Default 'America/Los_Angeles'.
+  windows?: ScheduleWindow[];  // time-of-day bands; the first match wins
+  intervalMs?: number;   // cadence when no window matches (site-level default)
+}
 export interface SiteConfig {
   id: string;
   url: string;
@@ -33,8 +43,26 @@ export interface SiteConfig {
   enabled: boolean;
   label?: string;
   intervalMs?: number;   // per-site override; falls back to schedule.intervalMs
+  schedule?: SiteSchedule;  // optional time-of-day-aware cadence; see resolution order below
 }
 ```
+
+**Why per-site schedules (not global):** scrape-cadence patterns are site-specific. Hermès releases
+inventory in the early-morning Pacific hours (history shows ~70% of all product changes happen
+06:00–11:00 PT, reliably across most days, with a weaker afternoon bump ~14:00–15:00 PT and a near-dead
+16:00–06:00). A different site could drop on a different clock entirely — so each site's windows must
+carry their **own `timezone`**; never assume a single global zone.
+
+**Interval resolution order** (most specific wins), evaluated each scheduler tick:
+1. The first `site.schedule.windows[]` entry whose `[startHour, endHour)` (in `site.schedule.timezone`)
+   contains the current time → its `intervalMs`.
+2. Else `site.schedule.intervalMs`.
+3. Else the plugin's `suggestedSchedule` (see Step 3a) resolved the same way.
+4. Else `site.intervalMs`.
+5. Else the global `schedule.intervalMs`.
+
+A site with no `schedule` and no plugin default behaves exactly as today (flat interval) — fully
+backward-compatible.
 - `AppConfig` gains `sites: SiteConfig[]`. Keep `target: TargetConfig` as a **derived alias**
   for `sites[0]` (read) so the rest of the codebase and existing tests keep compiling.
 - **Migration on load** (in `loadAppConfig` / `loadAppConfigLenient`): if no `sites` present,
@@ -71,8 +99,27 @@ Add (async-returning, see design note):
 - Keep the **single recursive `setTimeout` tick** but make it a short scheduler tick: each
   enabled site carries its own `nextCheckAt`; on each tick, run `runCheckForSite` for any due
   site (sequentially, to keep one browser context at a time), then set
-  `nextCheckAt = now + (site.intervalMs ?? schedule.intervalMs)`. Preserve the existing ±20%
-  jitter and 2× empty-scrape backoff **per site** (move those into `SiteStatus`).
+  `nextCheckAt = now + resolveIntervalMs(site, plugin, schedule, Date.now())`. Preserve the
+  existing ±20% jitter and 2× empty-scrape backoff **per site** (move those into `SiteStatus`).
+- Add `resolveIntervalMs(site, plugin, globalSchedule, nowMs)` implementing the resolution order
+  from Step 1. To evaluate a window, compute the current hour **in the schedule's `timezone`** via
+  `Intl.DateTimeFormat(undefined, { timeZone, hour: '2-digit', hourCycle: 'h23' })` (same approach
+  as `formatPacific`/`toPacific`), and handle windows that wrap past midnight
+  (`startHour > endHour` ⇒ match if `hour >= startHour || hour < endHour`). Log the chosen
+  band/interval at `debug` so the active tier is visible in `logs.jsonl`.
+
+## Step 3a — Plugin-provided default schedule
+- `src/plugin-types.ts`: add optional `suggestedSchedule?: SiteSchedule` to `SitePlugin` — lets a
+  plugin ship sensible cadence defaults intrinsic to that site, used when the site's own config
+  omits a schedule (resolution order step 3).
+- `plugins/hermes/index.ts`: set `suggestedSchedule` from the observed pattern, e.g.
+  `{ timezone: 'America/Los_Angeles', intervalMs: 30*60_000, windows: [
+     { startHour: 6, endHour: 11, intervalMs: 120_000 },   // peak morning drops — aggressive
+     { startHour: 11, endHour: 16, intervalMs: 600_000 },  // afternoon bump — moderate
+     { startHour: 16, endHour: 6, intervalMs: 45*60_000 }, // overnight — sparse (wraps midnight)
+   ] }`.
+- `runCheckForSite` already resolves the plugin via `findPlugin(site.url)`; pass it to
+  `resolveIntervalMs` so the plugin default is available without a separate lookup.
 - `getStatus(configStore)` returns `MultiSiteMonitorStatus`:
   `{ running, nextCheck?, sites: Record<id, SiteStatus & { url; label? }> }`.
 - `findPlugin(url)` stays per-URL (already URL-based) — called inside `runCheckForSite`.
@@ -112,15 +159,24 @@ Add (async-returning, see design note):
   selector, label, per-site interval with global-default hint, enabled toggle, Remove — disabled
   when only one site), plus an **Add Site** form (URL + optional selector/label). Rows call
   `api.sites.update/add/remove`; refresh the list after each.
-- Schedule, Notifications, and Browser cards are unchanged.
+- Per-site **schedule editor** (collapsible, optional): timezone select + a list of
+  `{ startHour, endHour, intervalMs }` window rows, with a "default cadence" field for
+  out-of-window hours. Show the plugin's `suggestedSchedule` as a prefill/"Use suggested" button
+  when the site matches a plugin and has none set. Empty = inherit (flat interval).
+- Schedule (global), Notifications, and Browser cards are unchanged.
 
 ---
 
 ## Files NOT changing
-- `src/scraper.ts` (already plugin-agnostic), `src/llm.ts`, `src/analyzer.ts`, `src/notifier.ts`,
-  `plugins/hermes/index.ts`, `src/predictor.ts`
+- `src/scraper.ts` (already plugin-agnostic), `src/llm.ts`, `src/analyzer.ts`, `src/notifier.ts`
 - `client/src/pages/ProvidersPage.tsx`, `DebugLogPage.tsx`, `App.tsx`
 - `src/agent.ts` (already passes `configStore`; no change needed)
+
+> **Note:** `plugins/hermes/index.ts` *does* change now (Step 3a adds `suggestedSchedule`).
+> Also, this plan predates v4.2.0, which **removed the Predictions feature** (`/predict`,
+> `src/predictor.ts`, the Monitor-page Predictions card). The `POST /api/predict` / `api.predict()` /
+> Predictions-card references in Steps 4–6 are stale and should be dropped when implementing — the
+> Discord `/ask` Q&A already reads per-site history. Resolve this before starting.
 
 ## Tests
 - `src/__tests__/state.test.ts`: cover the old→map migration and per-site load/save (now async).

@@ -40,6 +40,7 @@ function makeProvider(
 
 function makeConfig(providers: LlmProviderConfig[]): AppConfig {
   return {
+    sites: [{ id: 'example-test01', url: 'https://example.com', selector: '', enabled: true }],
     target: { url: 'https://example.com', selector: '' },
     schedule: { intervalMs: 300_000, runOnce: false },
     browser: {
@@ -114,11 +115,12 @@ describe('validateAppConfig', () => {
     expect(validateAppConfig(config)).toHaveLength(0);
   });
 
-  it('reports missing target URL', () => {
+  it('reports missing site / target URL', () => {
     const config = makeConfig([makeProvider('gemini')]);
+    config.sites = [];
     config.target.url = '';
     const errors = validateAppConfig(config);
-    expect(errors.some((e) => e.includes('targetUrl'))).toBe(true);
+    expect(errors.some((e) => e.includes('site') || e.includes('targetUrl'))).toBe(true);
   });
 
   it('reports missing Discord webhook URL', () => {
@@ -145,6 +147,7 @@ describe('validateAppConfig', () => {
 
   it('can return multiple errors at once', () => {
     const config = makeConfig([makeProvider('gemini', { apiKey: undefined })]);
+    config.sites = [];
     config.target.url = '';
     config.notifications.discordWebhookUrl = '';
     const errors = validateAppConfig(config);

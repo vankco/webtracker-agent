@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { generateSiteId } from './config.js';
 
 const STATE_FILE = path.resolve('state.json');
 
@@ -32,17 +33,86 @@ export function appendHistory(
   return [...(existing ?? []), entry].slice(-MAX_HISTORY);
 }
 
-export function loadState(): MonitorState | null {
-  if (!fs.existsSync(STATE_FILE)) return null;
+/** Map of siteId → per-site monitor state, the on-disk shape of state.json. */
+export type StateMap = Record<string, MonitorState>;
+
+/**
+ * Reads state.json as a site-keyed map. Auto-migrates the legacy single-object
+ * format (a bare MonitorState with a top-level `url`) into a one-element map.
+ * Synchronous under the hood; the public API is async for the future Turso swap.
+ */
+function readMapSync(): StateMap {
+  if (!fs.existsSync(STATE_FILE)) return {};
   try {
-    return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) as MonitorState;
+    const parsed = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) as unknown;
+    if (parsed && typeof parsed === 'object') {
+      const obj = parsed as Record<string, unknown>;
+      // Legacy single-object form → wrap as a one-element map.
+      if (typeof obj.url === 'string') {
+        return { [generateSiteId(obj.url)]: parsed as MonitorState };
+      }
+      return parsed as StateMap;
+    }
+    return {};
   } catch {
-    return null;
+    return {};
   }
 }
 
+function writeMapSync(map: StateMap): void {
+  fs.writeFileSync(STATE_FILE, JSON.stringify(map, null, 2), 'utf-8');
+}
+
+/** Loads the full site-keyed state map (migrating the legacy format on read). */
+export async function loadAllState(): Promise<StateMap> {
+  return readMapSync();
+}
+
+/** Persists the full site-keyed state map. */
+export async function saveAllState(map: StateMap): Promise<void> {
+  writeMapSync(map);
+}
+
+/**
+ * Loads one site's state. Falls back to matching by `url` so state migrated
+ * from the legacy format (keyed under a different id) is still found and then
+ * re-keyed on the next save.
+ */
+export async function loadSiteState(siteId: string, url?: string): Promise<MonitorState | null> {
+  const map = readMapSync();
+  if (map[siteId]) return map[siteId];
+  if (url) {
+    const match = Object.values(map).find((st) => st.url === url);
+    if (match) return match;
+  }
+  return null;
+}
+
+/** Persists one site's state, dropping any stale duplicate keyed by the same url. */
+export async function saveSiteState(siteId: string, state: MonitorState): Promise<void> {
+  const map = readMapSync();
+  for (const key of Object.keys(map)) {
+    if (key !== siteId && map[key].url === state.url) delete map[key];
+  }
+  map[siteId] = state;
+  writeMapSync(map);
+}
+
+// ---------------------------------------------------------------------------
+// Deprecated single-site shims (kept for the /ask path until it goes per-site).
+// ---------------------------------------------------------------------------
+
+/** @deprecated Returns the first site's state. Use loadSiteState. */
+export function loadState(): MonitorState | null {
+  return Object.values(readMapSync())[0] ?? null;
+}
+
+/** @deprecated Writes one site's state, matching by url. Use saveSiteState. */
 export function saveState(state: MonitorState): void {
-  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
+  const map = readMapSync();
+  const id = Object.keys(map).find((k) => map[k].url === state.url) ?? generateSiteId(state.url);
+  map[id] = state;
+  writeMapSync(map);
 }
 
 /**

@@ -17,7 +17,13 @@ import { createApiApp } from '../api.js';
 import { ConfigStore, loadAppConfigLenient } from '../config.js';
 import { MonitorController } from '../monitor-controller.js';
 import type { MonitorDependencies } from '../monitor-controller.js';
+import type { MonitorState } from '../state.js';
 import type { AnalysisResult } from '../analyzer.js';
+
+/** The multi-site status returns sites keyed by id; e2e configs have exactly one. */
+function firstSite(body: { data: { sites: Record<string, unknown> } }): any {
+  return Object.values(body.data.sites)[0];
+}
 import { PluginRegistry } from '../plugin-registry.js';
 import hermesPlugin from '@webtracker/plugin-hermes';
 import { setAlertCallback } from '../logger.js';
@@ -37,7 +43,7 @@ function makeFullConfig() {
 }
 
 interface StateStore {
-  state: { url: string; lastContent: string; lastChecked: string } | null;
+  state: MonitorState | null;
 }
 
 function makeDeps(overrides: Partial<MonitorDependencies> = {}): {
@@ -61,12 +67,11 @@ function makeDeps(overrides: Partial<MonitorDependencies> = {}): {
       alertsSent.push({ url, summary });
       return Promise.resolve();
     }),
-    loadState: vi.fn().mockImplementation(() => stateStore.state),
-    saveState: vi.fn().mockImplementation(
-      (s: { url: string; lastContent: string; lastChecked: string }) => {
-        stateStore.state = s;
-      }
-    ),
+    loadSiteState: vi.fn().mockImplementation(() => Promise.resolve(stateStore.state)),
+    saveSiteState: vi.fn().mockImplementation((_id: string, s: MonitorState) => {
+      stateStore.state = s;
+      return Promise.resolve();
+    }),
     closeScraperSession: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -171,8 +176,8 @@ describe('E2E: changed content triggers LLM and alert', () => {
     await new Promise((r) => setTimeout(r, 20));
 
     const statusRes = await request(app).get('/api/monitor/status');
-    expect(statusRes.body.data.lastResult.changed).toBe(true);
-    expect(statusRes.body.data.lastResult.summary).toBe('Big change detected.');
+    expect(firstSite(statusRes.body).lastResult.changed).toBe(true);
+    expect(firstSite(statusRes.body).lastResult.summary).toBe('Big change detected.');
 
     await controller.stop();
   });
@@ -211,7 +216,7 @@ describe('E2E: Gemini fails, Groq takes over', () => {
     await new Promise((r) => setTimeout(r, 20));
 
     const statusRes = await request(app).get('/api/monitor/status');
-    expect(statusRes.body.data.lastResult.provider).toBe('groq');
+    expect(firstSite(statusRes.body).lastResult.provider).toBe('groq');
 
     await controller.stop();
   });
@@ -251,7 +256,7 @@ describe('E2E: all LLM providers fail → local fallback', () => {
 
     const statusRes = await request(app).get('/api/monitor/status');
     expect(statusRes.status).toBe(200);
-    expect(statusRes.body.data.lastResult.fallback).toBe(true);
+    expect(firstSite(statusRes.body).lastResult.fallback).toBe(true);
 
     await controller.stop();
   });
@@ -338,7 +343,7 @@ describe('E2E: runtime config update', () => {
       .send({ target: { url: 'https://updated.example.com' } });
 
     const statusRes = await request(app).get('/api/monitor/status');
-    expect(statusRes.body.data.targetUrl).toBe('https://updated.example.com');
+    expect(firstSite(statusRes.body).url).toBe('https://updated.example.com');
   });
 });
 
@@ -362,8 +367,8 @@ describe('E2E: scrape errors appear in status.errors', () => {
     await controller.stop();
 
     const statusRes = await request(app).get('/api/monitor/status');
-    expect(statusRes.body.data.errors.length).toBeGreaterThan(0);
-    const messages = (statusRes.body.data.errors as Array<{ message: string }>).map((e) => e.message);
+    expect(firstSite(statusRes.body).errors.length).toBeGreaterThan(0);
+    const messages = (firstSite(statusRes.body).errors as Array<{ message: string }>).map((e) => e.message);
     expect(messages.some((m) => m.includes('Navigation timeout'))).toBe(true);
   });
 });
@@ -399,7 +404,7 @@ describe('E2E: Hermès deterministic change detection', () => {
       lastContent: oldProduct,
       lastChecked: new Date().toISOString(),
       lastProducts: [{ name: 'Bag A', color: 'Black', price: 'Price $5,000', sku: 'H001', available: true, url: '/us/en/product/bag-a/' }],
-    } as Parameters<MonitorDependencies['saveState']>[0];
+    } as MonitorState;
 
     scrapeContent.value = newProduct;
 
@@ -411,8 +416,8 @@ describe('E2E: Hermès deterministic change detection', () => {
     expect(alertsSent.length).toBeGreaterThan(0);
 
     const statusRes = await request(app).get('/api/monitor/status');
-    expect(statusRes.body.data.lastResult.changed).toBe(true);
-    expect(statusRes.body.data.lastResult.provider).toBe('deterministic');
+    expect(firstSite(statusRes.body).lastResult.changed).toBe(true);
+    expect(firstSite(statusRes.body).lastResult.provider).toBe('deterministic');
   });
 });
 
