@@ -9,6 +9,7 @@ import { createApiApp } from '../api.js';
 import { ConfigStore, loadAppConfigLenient } from '../config.js';
 import { MonitorController } from '../monitor-controller.js';
 import { PluginRegistry } from '../plugin-registry.js';
+import { loadState, getStateMtimeMs } from '../state.js';
 
 // ---------------------------------------------------------------------------
 // Mock heavy dependencies so tests run fast & offline
@@ -42,6 +43,7 @@ vi.mock('../notifier.js', () => ({
 vi.mock('../state.js', () => ({
   loadState: vi.fn().mockReturnValue(null),
   saveState: vi.fn(),
+  getStateMtimeMs: vi.fn().mockReturnValue(null),
 }));
 
 // ---------------------------------------------------------------------------
@@ -360,6 +362,27 @@ describe('POST /api/ask', () => {
     const res = await request(app).post('/api/ask').send({ question: 'what is in stock?' });
     expect(res.status).toBe(502);
     expect(res.body.error.code).toBe('INTERNAL_ERROR');
+  });
+
+  it('caches prompt context, rebuilding only when state.json mtime changes', async () => {
+    const mockedLoad = vi.mocked(loadState);
+    const mockedMtime = vi.mocked(getStateMtimeMs);
+    mockedLoad.mockClear();
+    mockedLoad.mockReturnValue({ url: 'https://example.com', lastContent: '', lastChecked: '' });
+    const { app } = makeAskApp();
+
+    // Stable mtime → second request reuses the cache (loadState not called again).
+    mockedMtime.mockReturnValue(111);
+    await request(app).post('/api/ask').send({ question: 'q1' });
+    await request(app).post('/api/ask').send({ question: 'q2' });
+    expect(mockedLoad).toHaveBeenCalledTimes(1);
+
+    // Changed mtime → cache invalidated, rebuilds once.
+    mockedMtime.mockReturnValue(222);
+    await request(app).post('/api/ask').send({ question: 'q3' });
+    expect(mockedLoad).toHaveBeenCalledTimes(2);
+
+    mockedMtime.mockReturnValue(null); // restore default for later tests
   });
 });
 

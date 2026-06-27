@@ -139,6 +139,44 @@ async function scrollNaturally(page: Page): Promise<void> {
   }
 }
 
+/**
+ * Human-like browsing noise: scroll to the footer (present on every page) and
+ * click a random *safe* footer link to vary the navigation pattern so the
+ * watch-URL visits don't look like a fixed scripted sequence (anti-bot).
+ *
+ * Deliberately constrained for safety on a live retail site:
+ *   - footer links only, same-origin relative paths — skips off-site/social
+ *     links, new-tab links, and any account/cart/checkout area (side effects).
+ *   - fully best-effort: never throws and never blocks the scrape. The next
+ *     watch URL re-navigates with page.goto regardless of where this lands.
+ */
+async function clickRandomSafeLink(page: Page): Promise<void> {
+  try {
+    await scrollNaturally(page); // brings the footer into view
+    const links = await page.$$('footer a[href]:visible');
+    const candidates: typeof links = [];
+    for (const a of links) {
+      const href = (await a.getAttribute('href').catch(() => '')) || '';
+      const target = (await a.getAttribute('target').catch(() => '')) || '';
+      if (target === '_blank') continue;                 // no orphan tabs
+      if (!href.startsWith('/')) continue;               // same-origin only (skips social/external, mailto, tel, #)
+      if (/account|login|sign|wishlist|cart|checkout|logout/i.test(href)) continue; // no side-effect areas
+      candidates.push(a);
+    }
+    if (candidates.length === 0) return;
+
+    const pick = candidates[Math.floor(Math.random() * candidates.length)];
+    await pick.scrollIntoViewIfNeeded().catch(() => {});
+    await randomDelay(400, 1200);
+    await pick.click({ timeout: 4_000 }).catch(() => {});
+    await page.waitForLoadState('domcontentloaded', { timeout: 8_000 }).catch(() => {});
+    // Linger on the clicked page for a moment, as a human reading it would.
+    await randomDelay(1500, 4000);
+  } catch {
+    // Best-effort noise — ignore every failure so it can't break a scrape.
+  }
+}
+
 async function saveDebugScreenshot(page: Page, label: string): Promise<void> {
   try {
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -363,6 +401,11 @@ async function verifyAndMergeWatchProducts(
   const verifications: ProductVerification[] = [];
   for (const url of watchUrls) {
     verifications.push(await verifyProductAvailability(page, url));
+    // After reading each product page, do some human-like browsing noise —
+    // click a random safe in-domain link — then pause, so the watch-URL visits
+    // don't look like a fixed scripted burst (anti-bot).
+    await clickRandomSafeLink(page);
+    await randomDelay(1000, 3000);
   }
   return mergeWatchAvailability(listing, verifications);
 }
@@ -560,16 +603,84 @@ export function formatHermesDiscordMessage(diff: HermesDiff, totalCount: number)
   return sections.join('\n\n');
 }
 
+// Stored timestamps are UTC (ISO 8601). Render them in US Pacific time with an
+// explicit zone label (PST/PDT, DST-aware) so the bot's answers are unambiguous.
+const PACIFIC_TIME_FORMAT = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Los_Angeles',
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  timeZoneName: 'short',
+});
+
+/** Format a UTC ISO timestamp as "YYYY-MM-DD HH:mm PDT" in US Pacific time. */
+function toPacific(ts: string): string {
+  const p = Object.fromEntries(
+    PACIFIC_TIME_FORMAT.formatToParts(new Date(ts)).map((x) => [x.type, x.value]),
+  );
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute} ${p.timeZoneName}`;
+}
+
+/**
+ * Full-history representation for LLM Q&A, built as an explicit availability
+ * event log. Starting from the oldest snapshot as a baseline, it walks forward
+ * and, at each change-event, diffs the available set against the previous one:
+ *   '+' a product became available, '-' it sold out / was removed,
+ *   '~' its price changed.
+ * This is the source-of-truth event stream — the model can reconstruct any
+ * product's full history (when it appeared, how long it lasted, how many times
+ * it restocked, current status) by scanning its SKU. Cost scales with the
+ * number of *changes*, not snapshots, so the entire history fits cheaply and
+ * nothing is dropped by a last-N cap. Timestamps are US Pacific (PST/PDT).
+ */
 export function formatHermesHistory(history: HistoryEntry[]): string {
-  return history
-    .map((entry) => {
-      const products = (entry.products as HermesProduct[]) ?? [];
-      const items = products
-        .map((p) => `    - ${p.name} (${p.color || 'n/a'}) ${p.price} [${p.sku}]`)
-        .join('\n');
-      return `[${entry.timestamp}] ${entry.availableCount} available — ${entry.changeSummary}\n${items}`;
-    })
-    .join('\n\n');
+  if (history.length === 0) return '(no history available)';
+
+  const t = (ts: string): string => toPacific(ts);
+  const price = (p: HermesProduct): string => (p.price || '').replace(/^Price\s*/i, '').trim();
+  const lbl = (p: HermesProduct): string => {
+    const pr = price(p);
+    return `${p.name} (${p.color || 'n/a'})${pr ? ` ${pr}` : ''} [${p.sku}]`;
+  };
+  const keyOf = (p: HermesProduct): string => p.sku || `${p.name}|${p.color}`;
+  const setOf = (entry: HistoryEntry): Map<string, HermesProduct> => {
+    const m = new Map<string, HermesProduct>();
+    for (const p of (entry.products as HermesProduct[]) ?? []) m.set(keyOf(p), p);
+    return m;
+  };
+
+  const lines: string[] = [];
+  let prev = new Map<string, HermesProduct>();
+
+  history.forEach((entry, i) => {
+    const cur = setOf(entry);
+    if (i === 0) {
+      const items = [...cur.values()].map(lbl).join(', ');
+      lines.push(`[${t(entry.timestamp)}] BASELINE — ${cur.size} available: ${items || '(none)'}`);
+    } else {
+      const added = [...cur.keys()].filter((k) => !prev.has(k)).map((k) => cur.get(k)!);
+      const removed = [...prev.keys()].filter((k) => !cur.has(k)).map((k) => prev.get(k)!);
+      const repriced = [...cur.keys()]
+        .filter((k) => prev.has(k))
+        .map((k) => ({ o: prev.get(k)!, n: cur.get(k)! }))
+        .filter(({ o, n }) => price(o) !== price(n));
+      const parts: string[] = [];
+      if (added.length) parts.push(`+ ${added.map(lbl).join(', ')}`);
+      if (removed.length) parts.push(`- ${removed.map(lbl).join(', ')}`);
+      if (repriced.length) {
+        parts.push(`~ ${repriced.map(({ o, n }) => `${n.name} [${n.sku}] ${price(o)}→${price(n)}`).join(', ')}`);
+      }
+      lines.push(`[${t(entry.timestamp)}] ${parts.join('  ') || '(no net change)'}`);
+    }
+    prev = cur;
+  });
+
+  const span = `${t(history[0].timestamp)} → ${t(history[history.length - 1].timestamp)}`;
+  return [
+    `Availability event log (oldest→newest, ${history.length} events over ${span}; ${prev.size} currently available). ` +
+      `Each line: '+' became available, '-' sold out/removed, '~' price change. ` +
+      `Reconstruct any product by scanning its [SKU].`,
+    lines.join('\n'),
+  ].join('\n');
 }
 
 export function formatHermesBaselineMessage(available: HermesProduct[]): string {

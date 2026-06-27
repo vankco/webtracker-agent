@@ -6,6 +6,7 @@
 
 import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
 import type { MonitorStatus } from './api-types.js';
+import { formatPacific } from './utils.js';
 
 export const COMMANDS = {
   help: 'help',
@@ -62,25 +63,11 @@ export function formatStatusReply(status: MonitorStatus): string {
   }
 
   if (status.lastCheck) {
-    const t = new Date(status.lastCheck).toLocaleString('en-US', {
-      timeZone: 'America/Los_Angeles',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-    lines.push(`Last check: ${t} PT`);
+    lines.push(`Last check: ${formatPacific(status.lastCheck)}`);
   }
 
   if (status.nextCheck) {
-    const t = new Date(status.nextCheck).toLocaleString('en-US', {
-      timeZone: 'America/Los_Angeles',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-    lines.push(`Next check: ${t} PT`);
+    lines.push(`Next check: ${formatPacific(status.nextCheck)}`);
   }
 
   if (status.lastResult) {

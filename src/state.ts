@@ -44,3 +44,16 @@ export function loadState(): MonitorState | null {
 export function saveState(state: MonitorState): void {
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
 }
+
+/**
+ * Last-modified time of state.json in ms, or null if it doesn't exist.
+ * Cheap (a stat, not a full read) — lets callers cache derived data and
+ * invalidate only when the file actually changes, including out-of-band edits.
+ */
+export function getStateMtimeMs(): number | null {
+  try {
+    return fs.statSync(STATE_FILE).mtimeMs;
+  } catch {
+    return null;
+  }
+}

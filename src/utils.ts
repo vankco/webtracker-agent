@@ -3,12 +3,21 @@ export function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Max history entries sent to an LLM — bounds prompt size / per-token cost. */
-export const MAX_LLM_HISTORY = 50;
-
-/** Returns the most recent `max` history entries (caps LLM prompt size). */
-export function recentHistory<T>(history: T[], max = MAX_LLM_HISTORY): T[] {
-  return history.length > max ? history.slice(-max) : history;
+/**
+ * Format a timestamp in US Pacific time with a DST-aware zone label,
+ * e.g. "Jun 23, 8:39 PM PDT". Defaults to now. Stored timestamps are UTC,
+ * so this keeps user-facing times unambiguous.
+ */
+export function formatPacific(date: Date | string = new Date()): string {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleString('en-US', {
+    timeZone: 'America/Los_Angeles',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  });
 }
 
 export function parseBooleanEnv(value: string | undefined, defaultValue: boolean): boolean {

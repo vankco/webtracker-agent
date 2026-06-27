@@ -1,3 +1,5 @@
+import { formatPacific } from './utils.js';
+
 function truncateForDiscordField(value: string, maxLen = 1024): string {
   if (value.length <= maxLen) return value;
   return `${value.slice(0, Math.max(0, maxLen - 3))}...`;
@@ -42,8 +44,7 @@ export async function sendDiscordAlert(
         description: safeDescription,
         color: 0xf59e0b, // amber
         fields,
-        footer: { text: 'Website Monitor Agent' },
-        timestamp: new Date().toISOString(),
+        footer: { text: `Website Monitor Agent • ${formatPacific()}` },
       },
     ],
   };

@@ -21,9 +21,9 @@ import {
 import { MonitorController } from './monitor-controller.js';
 import { getLogs, clearLogs } from './logger.js';
 import { defaultLlmAnalyzer } from './llm.js';
-import { getErrorMessage, recentHistory } from './utils.js';
+import { getErrorMessage } from './utils.js';
 import { scrapePageText } from './scraper.js';
-import { loadState } from './state.js';
+import { loadState, getStateMtimeMs } from './state.js';
 import { answerQuestion, buildAskPrompt } from './bot-qa.js';
 import type {
   ApiSuccessResponse,
@@ -37,6 +37,17 @@ import type {
   StartMonitorRequest,
   AskRequest,
 } from './api-types.js';
+
+// ---------------------------------------------------------------------------
+// /ask prompt-context cache
+// ---------------------------------------------------------------------------
+// Deriving the history event log + current-products text from state.json is
+// deterministic, so we only recompute it when the file actually changes. Keyed
+// on (state.json mtime, target url); when both match, reuse the cached strings
+// and skip both the disk read and the reconstruction.
+let askContextCache:
+  | { mtimeMs: number; url: string; currentProductsText: string; historyText: string }
+  | null = null;
 
 // ---------------------------------------------------------------------------
 // Error normalisation helpers
@@ -429,15 +440,23 @@ export function createApiRouter(
       return fail(res, 'NOT_CONFIGURED', 'No LLM providers enabled.', 422);
     }
 
-    const state = loadState();
     const plugin = monitorController.findPlugin(url);
+    const mtimeMs = getStateMtimeMs();
 
-    const currentProductsText =
-      plugin && state?.lastProducts ? plugin.productsToText(state.lastProducts) : '';
-    const historyText =
-      plugin?.formatHistoryForPrediction && state?.history
-        ? plugin.formatHistoryForPrediction(recentHistory(state.history))
-        : '';
+    let currentProductsText: string;
+    let historyText: string;
+    if (askContextCache && mtimeMs !== null && askContextCache.mtimeMs === mtimeMs && askContextCache.url === url) {
+      ({ currentProductsText, historyText } = askContextCache);
+    } else {
+      const state = loadState();
+      currentProductsText =
+        plugin && state?.lastProducts ? plugin.productsToText(state.lastProducts) : '';
+      historyText =
+        plugin?.formatHistoryForPrediction && state?.history
+          ? plugin.formatHistoryForPrediction(state.history)
+          : '';
+      if (mtimeMs !== null) askContextCache = { mtimeMs, url, currentProductsText, historyText };
+    }
 
     try {
       const prompt = buildAskPrompt(url, currentProductsText, historyText, body.question.trim());
