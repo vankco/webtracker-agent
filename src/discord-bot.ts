@@ -54,12 +54,13 @@ async function handleStatus(interaction: ChatInputCommandInteraction): Promise<v
 
 async function handleAsk(interaction: ChatInputCommandInteraction): Promise<void> {
   const question = interaction.options.getString('question', true);
+  const site = interaction.options.getString('site') ?? undefined;
   await interaction.deferReply();
   try {
     const res = await fetch(`${BASE}/ask`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, ...(site ? { site } : {}) }),
       signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) {

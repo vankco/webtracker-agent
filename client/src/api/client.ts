@@ -17,6 +17,7 @@ import type {
   TestProviderResponse,
   MultiSiteMonitorStatus,
   SiteConfig,
+  SiteSchedule,
   CreateSiteRequest,
   UpdateSiteRequest,
   StartMonitorRequest,
@@ -122,6 +123,9 @@ export const api = {
 
     remove: (id: string): Promise<{ removed: boolean }> =>
       request('DELETE', `/sites/${id}`),
+
+    suggestedSchedule: (id: string): Promise<{ suggestedSchedule: SiteSchedule | null }> =>
+      request('GET', `/sites/${id}/suggested-schedule`),
   },
 
   validate: {

@@ -274,6 +274,8 @@ export type GetLogsResponse = LogEntry[];
 
 export interface AskRequest {
   question: string;
+  /** Optional site selector — matches a site id, url, or label. Defaults to the first enabled site. */
+  site?: string;
 }
 
 export interface AskResponse {

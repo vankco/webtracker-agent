@@ -137,7 +137,7 @@ Real-time `warn`/`error` alerts are handled by the agent itself; the health moni
 
 | Command | Access | Description |
 |---|---|---|
-| `/ask question:<text>` | public | Ask anything — "what's in stock today?", "which bag sells out fastest?", "any bags under $4k?" |
+| `/ask question:<text> [site:<id\|url\|label>]` | public | Ask anything — "what's in stock today?", "which bag sells out fastest?", "any bags under $4k?". Optional `site` picks which tracked site to answer about (defaults to the first). |
 | `/status` | admin only | Monitor health, last/next check time, and last result |
 | `/help` | public | List all commands |
 
@@ -205,7 +205,7 @@ Then open `http://<your-ip>:5173` on any device on the same network.
 
 ### Config page
 
-- **Tracked Sites** — add, edit, enable/disable, and remove the sites you monitor. Each site has its own URL, optional CSS selector, label, optional per-site check interval, and an optional **time-of-day schedule** (timezone + cadence windows, e.g. scrape Hermès every 2 min during the 6–11 AM PT drop window and hourly overnight). Site changes apply immediately (independent of Save). The last site can't be removed.
+- **Tracked Sites** — add, edit, enable/disable, and remove the sites you monitor. Each site has its own URL, optional CSS selector, label, optional per-site check interval, and an optional **time-of-day schedule** (timezone + cadence windows, e.g. scrape Hermès every 2 min during the 6–11 AM PT drop window and hourly overnight). Site changes apply immediately (independent of Save). The last site can't be removed. A **Use suggested** button prefills the schedule from the matching site plugin's recommended cadence (e.g. the Hermès morning-drop windows).
 - **Schedule** — global default check interval (seconds) and run-once mode, used by any site without its own interval/schedule
 - **Notifications** — Discord webhook URL (write-only, never echoed back)
 - **Browser** — read-only view of browser settings (set these in `config.json`)

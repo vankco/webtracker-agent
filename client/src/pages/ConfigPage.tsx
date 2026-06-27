@@ -237,6 +237,32 @@ function TrackedSites({
 
   const patchDraft = (p: Partial<SiteDraft>) => setDraft((d) => (d ? { ...d, ...p } : d));
 
+  const useSuggested = async (id: string) => {
+    setBusy(true);
+    onError('');
+    try {
+      const { suggestedSchedule } = await api.sites.suggestedSchedule(id);
+      if (!suggestedSchedule) {
+        onError('No suggested schedule — no matching plugin for this site.');
+        return;
+      }
+      patchDraft({
+        scheduleOn: true,
+        timezone: suggestedSchedule.timezone ?? 'America/Los_Angeles',
+        schedDefaultSec: msToSec(suggestedSchedule.intervalMs),
+        windows: (suggestedSchedule.windows ?? []).map((w) => ({
+          startHour: String(w.startHour),
+          endHour: String(w.endHour),
+          intervalSec: msToSec(w.intervalMs),
+        })),
+      });
+    } catch (err) {
+      onError(err instanceof ApiError ? err.message : 'Failed to load suggested schedule.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const wrap = async (fn: () => Promise<void>) => {
     setBusy(true);
     onError('');
@@ -317,10 +343,15 @@ function TrackedSites({
                     <Input type="number" min={1} value={draft.intervalSec} onChange={(e) => patchDraft({ intervalSec: e.target.value })} />
                   </Field>
 
-                  <Field label="Time-of-day schedule">
-                    <Switch checked={draft.scheduleOn} onChange={(_e, d) => patchDraft({ scheduleOn: d.checked })}
-                      label={draft.scheduleOn ? 'On' : 'Off (use interval / plugin default)'} />
-                  </Field>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: tokens.spacingHorizontalM }}>
+                    <Field label="Time-of-day schedule">
+                      <Switch checked={draft.scheduleOn} onChange={(_e, d) => patchDraft({ scheduleOn: d.checked })}
+                        label={draft.scheduleOn ? 'On' : 'Off (use interval / plugin default)'} />
+                    </Field>
+                    <Button size="small" appearance="outline" disabled={busy} onClick={() => void useSuggested(s.id)}>
+                      Use suggested
+                    </Button>
+                  </div>
                   {draft.scheduleOn && (
                     <div className={styles.fieldGroup} style={{ paddingLeft: tokens.spacingHorizontalM }}>
                       <Field label="Timezone (IANA)">

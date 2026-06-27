@@ -39,6 +39,12 @@ export function slashCommandDefinitions(): ReturnType<SlashCommandBuilder['toJSO
           .setName('question')
           .setDescription('e.g. "what is in stock today?" or "which bag sells out fastest?"')
           .setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName('site')
+          .setDescription('Which site to ask about (id, url, or label). Defaults to the first site.')
+          .setRequired(false)
       ),
   ].map((cmd) => cmd.toJSON());
 }

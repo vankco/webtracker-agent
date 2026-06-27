@@ -9,7 +9,7 @@ import { createApiApp } from '../api.js';
 import { ConfigStore, loadAppConfigLenient } from '../config.js';
 import { MonitorController } from '../monitor-controller.js';
 import { PluginRegistry } from '../plugin-registry.js';
-import { loadState, getStateMtimeMs } from '../state.js';
+import { getStateMtimeMs, loadSiteState } from '../state.js';
 
 // ---------------------------------------------------------------------------
 // Mock heavy dependencies so tests run fast & offline
@@ -412,8 +412,8 @@ describe('POST /api/ask', () => {
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('returns 422 when no target URL is configured', async () => {
-    const configStore = new ConfigStore({ ...makeFullConfig(), target: { url: '', selector: '' } });
+  it('returns 422 when no site is configured', async () => {
+    const configStore = new ConfigStore({ ...makeFullConfig(), sites: [], target: { url: '', selector: '' } });
     const monitorController = new MonitorController();
     const app = createApiApp(configStore, monitorController, () => {});
     const res = await request(app).post('/api/ask').send({ question: 'what is in stock?' });
@@ -438,13 +438,13 @@ describe('POST /api/ask', () => {
   });
 
   it('caches prompt context, rebuilding only when state.json mtime changes', async () => {
-    const mockedLoad = vi.mocked(loadState);
+    const mockedLoad = vi.mocked(loadSiteState);
     const mockedMtime = vi.mocked(getStateMtimeMs);
     mockedLoad.mockClear();
-    mockedLoad.mockReturnValue({ url: 'https://example.com', lastContent: '', lastChecked: '' });
+    mockedLoad.mockResolvedValue({ url: 'https://example.com', lastContent: '', lastChecked: '' });
     const { app } = makeAskApp();
 
-    // Stable mtime → second request reuses the cache (loadState not called again).
+    // Stable mtime → second request reuses the cache (loadSiteState not called again).
     mockedMtime.mockReturnValue(111);
     await request(app).post('/api/ask').send({ question: 'q1' });
     await request(app).post('/api/ask').send({ question: 'q2' });
@@ -456,6 +456,36 @@ describe('POST /api/ask', () => {
     expect(mockedLoad).toHaveBeenCalledTimes(2);
 
     mockedMtime.mockReturnValue(null); // restore default for later tests
+  });
+
+  it('routes the question to the site named by the `site` selector', async () => {
+    const mockedLoad = vi.mocked(loadSiteState);
+    mockedLoad.mockClear();
+    mockedLoad.mockResolvedValue(null);
+    const { app, configStore } = makeAskApp();
+    await request(app).post('/api/sites').send({ url: 'https://second.example.com', label: 'Second' });
+    const second = configStore.getSites().find((s) => s.label === 'Second')!;
+
+    const res = await request(app).post('/api/ask').send({ question: 'in stock?', site: 'Second' });
+    expect(res.status).toBe(200);
+    // loadSiteState should have been called for the resolved (second) site.
+    expect(mockedLoad).toHaveBeenCalledWith(second.id, second.url);
+  });
+});
+
+describe('GET /api/sites/:id/suggested-schedule', () => {
+  it('returns null for a site with no matching plugin', async () => {
+    const { app, configStore } = makeApp();
+    const id = configStore.getSites()[0].id;
+    const res = await request(app).get(`/api/sites/${id}/suggested-schedule`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.suggestedSchedule).toBeNull();
+  });
+
+  it('404s for an unknown site', async () => {
+    const { app } = makeApp();
+    const res = await request(app).get('/api/sites/nope/suggested-schedule');
+    expect(res.status).toBe(404);
   });
 });
 

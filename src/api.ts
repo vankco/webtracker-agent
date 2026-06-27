@@ -24,7 +24,7 @@ import { getLogs, clearLogs } from './logger.js';
 import { defaultLlmAnalyzer } from './llm.js';
 import { getErrorMessage } from './utils.js';
 import { scrapePageText } from './scraper.js';
-import { loadState, getStateMtimeMs } from './state.js';
+import { loadSiteState, getStateMtimeMs } from './state.js';
 import { answerQuestion, buildAskPrompt } from './bot-qa.js';
 import type {
   ApiSuccessResponse,
@@ -46,11 +46,30 @@ import type {
 // ---------------------------------------------------------------------------
 // Deriving the history event log + current-products text from state.json is
 // deterministic, so we only recompute it when the file actually changes. Keyed
-// on (state.json mtime, target url); when both match, reuse the cached strings
+// on (state.json mtime, site id); when both match, reuse the cached strings
 // and skip both the disk read and the reconstruction.
 let askContextCache:
-  | { mtimeMs: number; url: string; currentProductsText: string; historyText: string }
+  | { mtimeMs: number; siteId: string; currentProductsText: string; historyText: string }
   | null = null;
+
+/**
+ * Resolves which site an /ask question targets. Matches an optional selector
+ * against site id, exact url, or label (then substring); defaults to the first
+ * enabled site.
+ */
+function resolveAskSite(sites: SiteConfig[], selector?: string): SiteConfig | undefined {
+  const pool = sites.filter((s) => s.enabled).length > 0 ? sites.filter((s) => s.enabled) : sites;
+  const q = selector?.trim().toLowerCase();
+  if (q) {
+    return (
+      pool.find((s) => s.id.toLowerCase() === q) ??
+      pool.find((s) => s.url.toLowerCase() === q) ??
+      pool.find((s) => (s.label ?? '').toLowerCase() === q) ??
+      pool.find((s) => s.url.toLowerCase().includes(q) || (s.label ?? '').toLowerCase().includes(q))
+    );
+  }
+  return pool[0];
+}
 
 // ---------------------------------------------------------------------------
 // Error normalisation helpers
@@ -255,6 +274,15 @@ export function createApiRouter(
     const site = configStore.getSites().find((s) => s.id === id);
     if (!site) return fail(res, 'NOT_FOUND', `Unknown site id '${id}'.`, 404);
     ok(res, site);
+  });
+
+  // Plugin-suggested schedule for a site (null if no plugin matches / none set).
+  router.get('/sites/:id/suggested-schedule', (req: Request, res: Response) => {
+    const id = String(req.params.id);
+    const site = configStore.getSites().find((s) => s.id === id);
+    if (!site) return fail(res, 'NOT_FOUND', `Unknown site id '${id}'.`, 404);
+    const plugin = monitorController.findPlugin(site.url);
+    ok(res, { suggestedSchedule: plugin?.suggestedSchedule ?? null });
   });
 
   router.put('/sites/:id', (req: Request, res: Response) => {
@@ -493,11 +521,11 @@ export function createApiRouter(
     }
 
     const config = configStore.get();
-    const url = config.target.url;
-
-    if (!url) {
-      return fail(res, 'NOT_CONFIGURED', 'No target URL configured.', 422);
+    const site = resolveAskSite(config.sites, body.site);
+    if (!site || !site.url) {
+      return fail(res, 'NOT_CONFIGURED', 'No site configured to answer about.', 422);
     }
+    const url = site.url;
 
     const providers = getEnabledProvidersByPriority(config);
     if (providers.length === 0) {
@@ -509,17 +537,17 @@ export function createApiRouter(
 
     let currentProductsText: string;
     let historyText: string;
-    if (askContextCache && mtimeMs !== null && askContextCache.mtimeMs === mtimeMs && askContextCache.url === url) {
+    if (askContextCache && mtimeMs !== null && askContextCache.mtimeMs === mtimeMs && askContextCache.siteId === site.id) {
       ({ currentProductsText, historyText } = askContextCache);
     } else {
-      const state = loadState();
+      const state = await loadSiteState(site.id, site.url);
       currentProductsText =
         plugin && state?.lastProducts ? plugin.productsToText(state.lastProducts) : '';
       historyText =
         plugin?.formatHistoryForPrediction && state?.history
           ? plugin.formatHistoryForPrediction(state.history)
           : '';
-      if (mtimeMs !== null) askContextCache = { mtimeMs, url, currentProductsText, historyText };
+      if (mtimeMs !== null) askContextCache = { mtimeMs, siteId: site.id, currentProductsText, historyText };
     }
 
     try {
